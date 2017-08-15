@@ -1,0 +1,33 @@
+{
+  "name": "redux-consistency",
+  "version": "0.0.1",
+  "description": "Eventually Consistent Middleware",
+  "main": "src/index.js",
+  "config": {
+    "mochaopts": "--reporter mocha-env-reporter"
+  },
+  "scripts": {
+    "test": "mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
+    "release": "wnpm-release --no-shrinkwrap",
+    "lint": "eslint --cache --format codeframe --ext .js,.jsx ."
+  },
+  "publishConfig": {
+    "registry": "https://repo.dev.wixpress.com/artifactory/api/npm/npm-repos"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "eslint": "^3.16.1",
+    "eslint-config-standard": "^7.0.0",
+    "eslint-plugin-chai-friendly": "^0.3.6",
+    "eslint-plugin-lodash": "^2.4.0",
+    "eslint-plugin-mocha": "^4.8.0",
+    "eslint-plugin-promise": "^3.5.0",
+    "eslint-plugin-standard": "^2.1.1",
+    "mocha": "^3.2.0",
+    "mocha-env-reporter": "^2.0.4",
+    "redux": "^3.6.0",
+    "wnpm-ci": "*"
+  }
+}
