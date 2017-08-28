@@ -1,7 +1,7 @@
 {
-  "name": "redux-consistency",
+  "name": "redux-serial-effects",
   "version": "0.0.1",
-  "description": "Eventually Consistent Middleware",
+  "description": "A middleware library for managing side-effects based on state changes, following an actual vs. expected philosophy, and supporting composability",
   "main": "src/index.js",
   "config": {
     "mochaopts": "--reporter mocha-env-reporter"
