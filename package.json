@@ -7,6 +7,7 @@
     "mochaopts": "--reporter mocha-env-reporter"
   },
   "scripts": {
+    "build": "#",
     "test": "mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
     "release": "wnpm-release --no-shrinkwrap",
     "lint": "eslint --cache --format codeframe --ext .js,.jsx ."
