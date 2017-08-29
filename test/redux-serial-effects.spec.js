@@ -6,7 +6,7 @@ const { combineSubscribers, serialEffectsMiddleware } = require('../src/index')
 
 /* global describe, it */
 
-describe('eventual consistency', function() {
+describe('serial effects', function() {
   const SET_COUNTER = 'SET_COUNTER'
 
   const unhandledRejectionListener = reason => {
