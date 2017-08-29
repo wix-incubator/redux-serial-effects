@@ -2,12 +2,12 @@
   "name": "redux-serial-effects",
   "version": "0.0.1",
   "description": "A middleware library for managing side-effects based on state changes, following an actual vs. expected philosophy, and supporting composability",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "config": {
     "mochaopts": "--reporter mocha-env-reporter"
   },
   "scripts": {
-    "build": "#",
+    "build": "babel src --presets babel-preset-es2015 --out-dir dist",
     "test": "mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
     "release": "wnpm-release --no-shrinkwrap",
     "lint": "eslint --cache --format codeframe --ext .js,.jsx ."
@@ -15,9 +15,10 @@
   "publishConfig": {
     "registry": "https://repo.dev.wixpress.com/artifactory/api/npm/npm-repos"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-preset-es2015": "^6.24.1",
     "chai": "^3.5.0",
     "eslint": "^3.16.1",
     "eslint-config-standard": "^7.0.0",
