@@ -68,13 +68,13 @@ const createSerialEffectsMiddleware = (extraArgument) => {
 
   const subscribe = registrar(
     fn => (subscribers = subscribers.concat(fn)),
-    index => (subscribers = subscribers.splice(index, 1)),
+    index => (subscribers.splice(index, 1)),
     fn => subscribers.indexOf(fn)
   )
 
   const onIdle = registrar(
     fn => (idleCallbacks = idleCallbacks.concat(fn)),
-    index => (idleCallbacks = idleCallbacks.splice(index, 1)),
+    index => (idleCallbacks.splice(index, 1)),
     fn => idleCallbacks.indexOf(fn)
   )
 
@@ -89,5 +89,3 @@ const serialEffectsMiddleware = createSerialEffectsMiddleware()
 serialEffectsMiddleware.withExtraArgument = createSerialEffectsMiddleware
 
 module.exports = serialEffectsMiddleware
-
-// vim: set ts=2 sw=2 tw=80 et :

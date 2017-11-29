@@ -102,6 +102,51 @@ describe('serial effects', function() {
       }, 50)
     })
 
+    it('should not call unsubscribed idle callback', function(done) {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      let sideEffectsDone = false
+      const subscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              sideEffectsDone = true
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(subscriber)
+      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+
+      let idleCalls = 0
+
+      onIdle(() => {
+        idleCalls = idleCalls + 1
+      })()
+
+      store.dispatch({ type: SET_COUNTER, value: 1 })
+
+      setTimeout(() => {
+        expect(sideEffectsDone).to.be.true
+        expect(idleCalls).to.equal(0)
+        done()
+      }, 50)
+    })
+
     it('should not go back to idle mode before side-effects have completely resolved', function(
       done
     ) {
@@ -761,5 +806,3 @@ describe('serial effects', function() {
     })
   })
 })
-
-// vim: set ts=2 sw=2 tw=80 et :
