@@ -1,15 +1,17 @@
 {
   "parserOptions": {
-    "ecmaVersion": 6,
+    "ecmaVersion": 2017,
     "sourceType": "module"
   },
   "plugins": [
     "lodash",
     "mocha",
-		"chai-friendly"
+    "chai-friendly",
+    "prettier"
   ],
   "extends": [
-    "standard"
+    "standard",
+    "prettier"
   ],
   "rules": {
     "block-spacing": 0,
@@ -21,6 +23,7 @@
     "lodash/import-scope": 2,
     "mocha/no-exclusive-tests": 2,
     "new-parens": 0,
+    "no-console": 2,
     "no-extra-parens": 0,
     "no-multi-spaces": 0,
     "no-multiple-empty-lines": 0,
@@ -39,8 +42,17 @@
     "space-in-parens": 0,
     "spaced-comment": 0,
     "yield-star-spacing": 0,
-		"no-unused-expressions": 0,
-		"chai-friendly/no-unused-expressions": 2,
-		"no-mixed-spaces-and-tabs": 0
+    "standard/array-bracket-even-spacing": 0,
+    "no-unused-expressions": 0,
+    "chai-friendly/no-unused-expressions": 2,
+    "prettier/prettier": [
+      "error",
+      {
+        "printWidth": 80,
+        "semi": false,
+        "singleQuote": true,
+        "trailingComma": "none"
+      }
+    ]
   }
 }
