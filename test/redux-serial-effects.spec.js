@@ -15,7 +15,9 @@ describe('serial effects', function() {
   process.on('unhandledRejection', unhandledRejectionListener)
 
   describe('subscriber API', function() {
-    it('should return to idle state when all side-effects have resolved', function(done) {
+    it('should return to idle state when all side-effects have resolved', function(
+      done
+    ) {
       const initialState = {
         counter: 0
       }
@@ -41,9 +43,17 @@ describe('serial effects', function() {
           })
         }
       }
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let sideEffectsDone = false
 
@@ -57,7 +67,9 @@ describe('serial effects', function() {
       store.dispatch({ type: SET_COUNTER, value: 2 })
     })
 
-    it('should call idle callback once per transition back to idle', function(done) {
+    it('should call idle callback once per transition back to idle', function(
+      done
+    ) {
       const initialState = {
         counter: 0
       }
@@ -83,9 +95,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let idleCalls = 0
 
@@ -128,9 +148,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let idleCalls = 0
 
@@ -172,9 +200,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let isIdle = false
       onIdle(() => {
@@ -212,9 +248,16 @@ describe('serial effects', function() {
         expect(to).to.deep.equal({ counter: 1 })
       }
 
-      const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       store.dispatch({ type: SET_COUNTER, value: 1 })
     })
@@ -243,9 +286,17 @@ describe('serial effects', function() {
         return () => Promise.resolve()
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let caughtException = false
       const listeners = process.listeners('unhandledRejection')
@@ -269,7 +320,9 @@ describe('serial effects', function() {
       store.dispatch({ type: SET_COUNTER, value: 2 })
     })
 
-    it('should work with subscribers that return promise chains', function(done) {
+    it('should work with subscribers that return promise chains', function(
+      done
+    ) {
       const initialState = {
         counter: 0
       }
@@ -294,9 +347,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       store.dispatch({ type: SET_COUNTER, value: 1 })
 
@@ -306,7 +367,9 @@ describe('serial effects', function() {
       })
     })
 
-    it('should dispatch an action returned from side-effects chain', function(done) {
+    it('should dispatch an action returned from side-effects chain', function(
+      done
+    ) {
       const initialState = {
         counter: 0,
         mirroredCounter: 0
@@ -334,14 +397,24 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       store.dispatch({ type: SET_COUNTER, value: 1 })
 
       onIdle(() => {
-        expect(store.getState().mirroredCounter).to.equal(store.getState().counter)
+        expect(store.getState().mirroredCounter).to.equal(
+          store.getState().counter
+        )
         done()
       })
     })
@@ -379,9 +452,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       let isIdle = false
       onIdle(() => {
@@ -409,7 +490,10 @@ describe('serial effects', function() {
     const DECREMENT = 'decrement'
     const LOST_SYNC = 'lost-sync'
 
-    const counterReducer = id => (state = { id, counter: 0, inSync: true }, action) => {
+    const counterReducer = id => (
+      state = { id, counter: 0, inSync: true },
+      action
+    ) => {
       if (action.id !== state.id) return state
 
       switch (action.type) {
@@ -499,18 +583,38 @@ describe('serial effects', function() {
       const reducer = combineReducers(reducerMap)
       const subscriber = combineSubscribers(subscriberMap)
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
       const store = createStore(reducer, applyMiddleware(middleware))
 
       onIdle(() => {
-        expect(store.getState().counter1).to.deep.equal({ id: 1, counter: 1, inSync: true })
+        expect(store.getState().counter1).to.deep.equal({
+          id: 1,
+          counter: 1,
+          inSync: true
+        })
         expect(backendServices[0].value).to.equal(1)
-        expect(store.getState().counter2).to.deep.equal({ id: 2, counter: 0, inSync: true })
+        expect(store.getState().counter2).to.deep.equal({
+          id: 2,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[1].value).to.equal(0)
-        expect(store.getState().counter3).to.deep.equal({ id: 3, counter: 0, inSync: true })
+        expect(store.getState().counter3).to.deep.equal({
+          id: 3,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[2].value).to.equal(0)
-        expect(store.getState().counter4).to.deep.equal({ id: 4, counter: 0, inSync: true })
+        expect(store.getState().counter4).to.deep.equal({
+          id: 4,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[3].value).to.equal(0)
         done()
       })
@@ -535,18 +639,38 @@ describe('serial effects', function() {
       const reducer = combineReducers(reducerMap)
       const subscriber = combineSubscribers(subscriberMap)
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
       const store = createStore(reducer, applyMiddleware(middleware))
 
       onIdle(() => {
-        expect(store.getState().counter1).to.deep.equal({ id: 1, counter: 1, inSync: false })
+        expect(store.getState().counter1).to.deep.equal({
+          id: 1,
+          counter: 1,
+          inSync: false
+        })
         expect(backendServices[0].value).to.equal(0)
-        expect(store.getState().counter2).to.deep.equal({ id: 2, counter: 0, inSync: true })
+        expect(store.getState().counter2).to.deep.equal({
+          id: 2,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[1].value).to.equal(0)
-        expect(store.getState().counter3).to.deep.equal({ id: 3, counter: 0, inSync: true })
+        expect(store.getState().counter3).to.deep.equal({
+          id: 3,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[2].value).to.equal(0)
-        expect(store.getState().counter4).to.deep.equal({ id: 4, counter: 0, inSync: true })
+        expect(store.getState().counter4).to.deep.equal({
+          id: 4,
+          counter: 0,
+          inSync: true
+        })
         expect(backendServices[3].value).to.equal(0)
         done()
       })
@@ -619,13 +743,19 @@ describe('serial effects', function() {
           return Object.assign({}, state, {
             vmsById: Object.keys(state.vmsById)
               .filter(key => key !== action.vm)
-              .reduce((acc, val) => Object.assign({}, acc, { [val]: state.vmsById[val] }), {}),
+              .reduce(
+                (acc, val) =>
+                  Object.assign({}, acc, { [val]: state.vmsById[val] }),
+                {}
+              ),
             vmList: state.vmList.filter(key => key !== action.vm),
             toGC: state.toGC.concat(action.vm)
           })
         }
         case GC: {
-          return Object.assign({}, state, { toGC: state.toGC.filter(vm => vm !== action.vm) })
+          return Object.assign({}, state, {
+            toGC: state.toGC.filter(vm => vm !== action.vm)
+          })
         }
         default:
           return state
@@ -776,9 +906,17 @@ describe('serial effects', function() {
         }
       }
 
-      const { middleware, onIdle, subscribe } = serialEffectsMiddleware.withExtraArgument()
+      const {
+        middleware,
+        onIdle,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
-      const store = createStore(reducer, initialState, applyMiddleware(middleware))
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
 
       store.dispatch({ type: CREATE, host: 1 })
       expect(store.getState().vmList.length).to.equal(1)

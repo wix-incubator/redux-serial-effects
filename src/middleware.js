@@ -17,7 +17,7 @@
 // 2. Maintains a queue of side-effects that run in order dispatched
 // 3. Combining subscribers for composability
 
-const createSerialEffectsMiddleware = (extraArgument) => {
+const createSerialEffectsMiddleware = extraArgument => {
   let idleCallbacks = []
   let subscribers = []
   let queue = Promise.resolve()
@@ -68,13 +68,13 @@ const createSerialEffectsMiddleware = (extraArgument) => {
 
   const subscribe = registrar(
     fn => (subscribers = subscribers.concat(fn)),
-    index => (subscribers.splice(index, 1)),
+    index => subscribers.splice(index, 1),
     fn => subscribers.indexOf(fn)
   )
 
   const onIdle = registrar(
     fn => (idleCallbacks = idleCallbacks.concat(fn)),
-    index => (idleCallbacks.splice(index, 1)),
+    index => idleCallbacks.splice(index, 1),
     fn => idleCallbacks.indexOf(fn)
   )
 

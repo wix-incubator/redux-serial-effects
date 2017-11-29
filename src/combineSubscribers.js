@@ -1,6 +1,10 @@
 'use strict'
 
-const combineSubscribers = subscriberMap => (transition, dispatch, extraArgument) =>
+const combineSubscribers = subscriberMap => (
+  transition,
+  dispatch,
+  extraArgument
+) =>
   Promise.all(
     Object.keys(subscriberMap).map(
       key =>
