@@ -18,8 +18,8 @@
 // 3. Combining subscribers for composability
 
 const createSerialEffectsMiddleware = extraArgument => {
-  let idleCallbacks = []
-  let subscribers = []
+  const idleCallbacks = []
+  const subscribers = []
   let queue = Promise.resolve()
 
   const middleware = store => next => action => {
@@ -67,13 +67,13 @@ const createSerialEffectsMiddleware = extraArgument => {
   }
 
   const subscribe = registrar(
-    fn => (subscribers = subscribers.concat(fn)),
+    fn => subscribers.push(fn),
     index => subscribers.splice(index, 1),
     fn => subscribers.indexOf(fn)
   )
 
   const onIdle = registrar(
-    fn => (idleCallbacks = idleCallbacks.concat(fn)),
+    fn => idleCallbacks.push(fn),
     index => idleCallbacks.splice(index, 1),
     fn => idleCallbacks.indexOf(fn)
   )
