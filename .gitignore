@@ -53,3 +53,5 @@ dist/
 
 # tern project
 .tern-project
+
+package-lock.json
