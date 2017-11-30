@@ -190,6 +190,122 @@ describe('serial effects', function() {
       }, 50)
     })
 
+    it('should not call unsubscribed subscribers', function() {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      let subscriberCalled = false
+      const subscriber = ({ from, to }) => {
+        subscriberCalled = true
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(subscriber)()
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+        expect(subscriberCalled).to.be.false
+      })
+    })
+
+    it('should not break when unsubscribing an already unsubscribed subscriber', function() {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      let unsubscriberCalled = false
+      const unsubscriber = ({ from, to }) => {
+        unsubscriberCalled = true
+      }
+
+      let subscriberCalled = false
+      const subscriber = ({ from, to }) => {
+        subscriberCalled = true
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(subscriber)
+      const unsubscribeUnsubscriber = subscribe(unsubscriber)
+
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      unsubscribeUnsubscriber()
+      unsubscribeUnsubscriber()
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+        expect(unsubscriberCalled).to.be.false
+        expect(subscriberCalled).to.be.true
+      })
+    })
+
+    it('should not call subscribers when the dispatched action does not change the state', function() {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      let subscriberCalled = false
+      const subscriber = ({ from, to }) => {
+        subscriberCalled = true
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      return store.dispatch({ type: ADD_UNDO, undo: [] }).then(() => {
+        expect(subscriberCalled).to.be.false
+      })
+    })
+
     it('should not go back to idle mode before side-effects have completely resolved', function(
       done
     ) {
@@ -669,17 +785,22 @@ describe('serial effects', function() {
     })
 
     it('should allow subscribers to resolve to an array of actions to dispatch', function() {
+      const LAST_VALUE = 'LAST_VALUE'
       const initialState = {
         counter: 0,
-        undo: []
+        undo: [],
+        lastValue: undefined
       }
-      const reducer = (state, action) => {
+      const reducer = (state = initialState, action) => {
         switch (action.type) {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
           case ADD_UNDO: {
             return Object.assign({}, state, { undo: action.undo })
+          }
+          case LAST_VALUE: {
+            return Object.assign({}, state, { lastValue: action.lastValue })
           }
           default:
             return state
@@ -694,19 +815,12 @@ describe('serial effects', function() {
                 {
                   type: ADD_UNDO,
                   undo: to.undo.concat(from.counter)
+                },
+                {
+                  type: LAST_VALUE,
+                  lastValue: from.counter
                 }
               ])
-            }, 20)
-          })
-        }
-      }
-
-      const secondSubscriber = ({ from, to }) => {
-        if (from.undo !== to.undo) {
-          return new Promise((resolve, reject) => {
-            setTimeout(() => {
-              sideEffectsDone = true
-              resolve()
             }, 20)
           })
         }
@@ -717,465 +831,68 @@ describe('serial effects', function() {
         subscribe
       } = serialEffectsMiddleware.withExtraArgument()
       subscribe(firstSubscriber)
-      subscribe(secondSubscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-
-      let sideEffectsDone = false
 
       const subscriberPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
       return subscriberPromise.then(() => {
-        expect(sideEffectsDone).to.be.true
         expect(store.getState().counter).to.equal(1)
         expect(store.getState().undo).to.eql([0])
+        expect(store.getState().lastValue).to.equal(0)
       })
     })
   })
 
-  describe('counter list example', function() {
-    //const ADD_ACOUNTER = 'add-counter'
-    //const REMOVE_ACOUNTER = 'remove-counter'
-    const INCREMENT = 'increment'
-    const DECREMENT = 'decrement'
-    const LOST_SYNC = 'lost-sync'
-
-    const counterReducer = id => (
-      state = { id, counter: 0, inSync: true },
-      action
-    ) => {
-      if (action.id !== state.id) return state
-
-      switch (action.type) {
-        case INCREMENT: {
-          return Object.assign({}, state, { counter: state.counter + 1 })
-        }
-        case DECREMENT: {
-          return Object.assign({}, state, { counter: state.counter - 1 })
-        }
-        case LOST_SYNC: {
-          return Object.assign({}, state, { inSync: false })
-        }
-        default:
-          return state
-      }
-    }
-
-    const increment = id => ({ type: INCREMENT, id })
-
-    //const decrement = id => ({ type: DECREMENT, id })
-
-    const lostSync = id => ({ type: LOST_SYNC, id })
-
-    const counterSubscriber = backendService => ({ from, to }) => {
-      // backendService is an API client that returns a promise for each API
-      // call, it is scoped to the counter's state
-      if (from.counter !== to.counter) {
-        // the counter value has changed, update the backend with an infite
-        // retry
-        const update = (retryCount = 2) => {
-          return backendService.setValue(to.counter).catch(() => {
-            if (retryCount) {
-              return update(retryCount - 1)
-            } else {
-              return lostSync(to.id)
-            }
-          })
-        }
-        return update()
-      } else {
-        return Promise.resolve()
-      }
-    }
-
-    const backendService = scope => {
-      let shouldFail = false
-      let _value = 0
-      return {
-        get shouldFail() {
-          return shouldFail
-        },
-        set shouldFail(value) {
-          shouldFail = value
-        },
-        get value() {
-          return _value
-        },
-        setValue(value) {
-          return new Promise((resolve, reject) => {
-            // call external API to set `value` in `scope`
-            setTimeout(() => {
-              if (shouldFail) {
-                reject(new Error('hardcoded error'))
-              } else {
-                _value = value
-                resolve()
-              }
-            }, 5)
-          })
-        }
-      }
-    }
-
+  describe('combineSubscribers', function() {
     it('should compose subscribers', function() {
-      const counterList = [1, 2, 3, 4]
-      const reducerMap = {}
-      const subscriberMap = {}
-      const backendServices = []
-
-      for (const counter in counterList) {
-        const counterName = `counter${counterList[counter]}`
-        const service = backendService(counterName)
-
-        reducerMap[counterName] = counterReducer(counterList[counter])
-        subscriberMap[counterName] = counterSubscriber(service)
-        backendServices.push(service)
+      const initialState = {
+        counterOne: { value: 0 },
+        counterTwo: { value: 1 },
+        counterThree: { value: 2 }
       }
-      const reducer = combineReducers(reducerMap)
-      const subscriber = combineSubscribers(subscriberMap)
-
-      const {
-        middleware,
-        subscribe
-      } = serialEffectsMiddleware.withExtraArgument()
-      subscribe(subscriber)
-      const store = createStore(reducer, applyMiddleware(middleware))
-
-      return store.dispatch(increment(1)).then(() => {
-        expect(store.getState().counter1).to.deep.equal({
-          id: 1,
-          counter: 1,
-          inSync: true
-        })
-        expect(backendServices[0].value).to.equal(1)
-        expect(store.getState().counter2).to.deep.equal({
-          id: 2,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[1].value).to.equal(0)
-        expect(store.getState().counter3).to.deep.equal({
-          id: 3,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[2].value).to.equal(0)
-        expect(store.getState().counter4).to.deep.equal({
-          id: 4,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[3].value).to.equal(0)
-      })
-    })
-
-    it('should follow promise chains returned from subscribers', function() {
-      const counterList = [1, 2, 3, 4]
-      const reducerMap = {}
-      const subscriberMap = {}
-      const backendServices = []
-
-      for (const counter in counterList) {
-        const counterName = `counter${counterList[counter]}`
-        const service = backendService(counterName)
-
-        reducerMap[counterName] = counterReducer(counterList[counter])
-        subscriberMap[counterName] = counterSubscriber(service)
-        backendServices.push(service)
-      }
-      const reducer = combineReducers(reducerMap)
-      const subscriber = combineSubscribers(subscriberMap)
-
-      const {
-        middleware,
-        subscribe
-      } = serialEffectsMiddleware.withExtraArgument()
-      subscribe(subscriber)
-      const store = createStore(reducer, applyMiddleware(middleware))
-
-      backendServices[0].shouldFail = true
-      return store.dispatch(increment(1)).then(() => {
-        expect(store.getState().counter1).to.deep.equal({
-          id: 1,
-          counter: 1,
-          inSync: false
-        })
-        expect(backendServices[0].value).to.equal(0)
-        expect(store.getState().counter2).to.deep.equal({
-          id: 2,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[1].value).to.equal(0)
-        expect(store.getState().counter3).to.deep.equal({
-          id: 3,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[2].value).to.equal(0)
-        expect(store.getState().counter4).to.deep.equal({
-          id: 4,
-          counter: 0,
-          inSync: true
-        })
-        expect(backendServices[3].value).to.equal(0)
-      })
-    })
-  })
-
-  describe('vm example', function() {
-    // actions
-    const CREATE = 'create'
-    const DELETE = 'delete'
-    const CONNECT = 'connect'
-    const DISCONNECT = 'disconnect'
-    const GC = 'GC'
-
-    // vm state
-    const CREATED = 'created'
-
-    // reducer
-    const initialState = {
-      vmsById: {},
-      vmList: [],
-      toGC: []
-    }
-    let uuidGen = () =>
-      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = (Math.random() * 16) | 0
-        const v = c === 'x' ? r : (r & 0x3) | 0x8
-        return v.toString(16)
-      })
-    const reducer = (state = initialState, action) => {
-      switch (action.type) {
-        case CREATE: {
-          const vm = {
-            id: uuidGen(),
-            host: action.host,
-            connected: false,
-            state: CREATED
+      const reducer = index => (state = { value: index }, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return action.value !== state.value
+              ? Object.assign({}, state, { value: action.value })
+              : state
           }
-          return Object.assign({}, state, {
-            vmsById: Object.assign({}, state.vmsById, {
-              [vm.id]: vm
-            }),
-            vmList: [...state.vmList, vm.id]
-          })
+          default:
+            return state
         }
-        case CONNECT: {
-          const vm = Object.assign({}, state.vmsById[action.vm], {
-            connected: true
-          })
-          return Object.assign({}, state, {
-            vmsById: Object.assign({}, state.vmsById, {
-              [vm.id]: vm
-            })
-          })
-        }
-        case DISCONNECT: {
-          const vm = Object.assign({}, state.vmsById[action.vm], {
-            connected: false
-          })
-          return Object.assign({}, state, {
-            vmsById: Object.assign({}, state.vmsById, {
-              [action.vm]: vm
-            })
-          })
-        }
-        case DELETE: {
-          return Object.assign({}, state, {
-            vmsById: Object.keys(state.vmsById)
-              .filter(key => key !== action.vm)
-              .reduce(
-                (acc, val) =>
-                  Object.assign({}, acc, { [val]: state.vmsById[val] }),
-                {}
-              ),
-            vmList: state.vmList.filter(key => key !== action.vm),
-            toGC: state.toGC.concat(action.vm)
-          })
-        }
-        case GC: {
-          return Object.assign({}, state, {
-            toGC: state.toGC.filter(vm => vm !== action.vm)
-          })
-        }
-        default:
-          return state
       }
-    }
 
-    describe('test-case tests', function() {
-      it('reducer should create a new vm', function() {
-        uuidGen = () => 1
-
-        const newState = reducer(initialState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: { 1: { id: 1, host: 1, connected: false, state: CREATED } },
-          vmList: [1],
-          toGC: []
-        })
-      })
-
-      it('reducer should delete a vm', function() {
-        uuidGen = () => 1
-
-        let newState = reducer(initialState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: { 1: { id: 1, host: 1, connected: false, state: CREATED } },
-          vmList: [1],
-          toGC: []
-        })
-
-        newState = reducer(initialState, { type: DELETE, vm: 1 })
-        expect(newState).to.deep.equal({ vmsById: {}, vmList: [], toGC: [1] })
-      })
-
-      it('reducer should connect a vm', function() {
-        let counter = 0
-        uuidGen = () => {
-          counter = counter + 1
-          return counter
-        }
-
-        let newState = reducer(initialState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1],
-          toGC: []
-        })
-
-        newState = reducer(newState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: false, state: CREATED },
-            2: { id: 2, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1, 2],
-          toGC: []
-        })
-
-        newState = reducer(newState, { type: CONNECT, vm: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: true, state: CREATED },
-            2: { id: 2, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1, 2],
-          toGC: []
-        })
-      })
-
-      it('reducer should disconnect a vm', function() {
-        let counter = 0
-        uuidGen = () => {
-          counter = counter + 1
-          return counter
-        }
-
-        let newState = reducer(initialState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1],
-          toGC: []
-        })
-
-        newState = reducer(newState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: false, state: CREATED },
-            2: { id: 2, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1, 2],
-          toGC: []
-        })
-
-        newState = reducer(newState, { type: CONNECT, vm: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: true, state: CREATED },
-            2: { id: 2, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1, 2],
-          toGC: []
-        })
-
-        newState = reducer(newState, { type: DISCONNECT, vm: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: {
-            1: { id: 1, host: 1, connected: false, state: CREATED },
-            2: { id: 2, host: 1, connected: false, state: CREATED }
-          },
-          vmList: [1, 2],
-          toGC: []
-        })
-      })
-
-      it('reducer should GC a vm', function() {
-        uuidGen = () => 1
-
-        let newState = reducer(initialState, { type: CREATE, host: 1 })
-        expect(newState).to.deep.equal({
-          vmsById: { 1: { id: 1, host: 1, connected: false, state: CREATED } },
-          vmList: [1],
-          toGC: []
-        })
-
-        newState = reducer(initialState, { type: DELETE, vm: 1 })
-        expect(newState).to.deep.equal({ vmsById: {}, vmList: [], toGC: [1] })
-      })
-    })
-
-    it('should hangle the GC of deleted VMs in the background', function() {
-      // logic for disconnecting deleted vms
-      const subscriber = ({ from, to }) => {
-        // select all vms that were deleted by this action
-        if (from.toGC !== to.toGC) {
-          return Promise.all(
-            to.toGC.filter(vm => !from.toGC.find(togc => togc === vm)).map(
-              vm =>
-                new Promise((resolve, reject) =>
-                  setTimeout(() => {
-                    resolve({ type: GC, vm })
-                  }, 10)
-                )
-            )
-          )
-        }
+      const triggeredSubscribers = []
+      const subscriber = index => ({ from, to }) => {
+        triggeredSubscribers.push(index)
       }
 
       const {
         middleware,
         subscribe
       } = serialEffectsMiddleware.withExtraArgument()
-      subscribe(subscriber)
+      subscribe(
+        combineSubscribers({
+          counterOne: subscriber(0),
+          counterTwo: subscriber(1),
+          counterThree: subscriber(2)
+        })
+      )
       const store = createStore(
-        reducer,
+        combineReducers({
+          counterOne: reducer(0),
+          counterTwo: reducer(1),
+          counterThree: reducer(2)
+        }),
         initialState,
         applyMiddleware(middleware)
       )
 
-      store.dispatch({ type: CREATE, host: 1 })
-      expect(store.getState().vmList.length).to.equal(1)
-      store.dispatch({ type: CREATE, host: 1 })
-      expect(store.getState().vmList.length).to.equal(2)
-      store.dispatch({ type: CREATE, host: 1 })
-      expect(store.getState().vmList.length).to.equal(3)
-      store.dispatch({ type: CONNECT, vm: store.getState().vmList[0] })
-      expect(store.getState().vmList.length).to.equal(3)
-      store.dispatch({ type: CONNECT, vm: store.getState().vmList[1] })
-      expect(store.getState().vmList.length).to.equal(3)
-      const vmToRemove = store.getState().vmList[0]
-
-      return store.dispatch({ type: DELETE, vm: vmToRemove }).then(() => {
-        expect(store.getState().vmList.length).to.equal(2)
-        expect(store.getState().toGC).to.be.empty
+      return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+        expect(triggeredSubscribers.length).to.equal(2)
       })
     })
   })

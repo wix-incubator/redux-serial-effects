@@ -15,13 +15,14 @@
     }
   },
   "scripts": {
-    "eslint-check": "eslint --print-config .eslintrc.js | eslint-config-prettier-check",
     "build": "babel src --presets babel-preset-es2015 --out-dir dist",
-    "test": "mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
-    "release": "wnpm-release --no-shrinkwrap",
-    "precommit": "lint-staged",
+    "eslint-check": "eslint --print-config .eslintrc.js | eslint-config-prettier-check",
+    "lint": "eslint --cache --format codeframe --ext .js,.jsx .",
     "lint-staged": "lint-staged",
-    "lint": "eslint --cache --format codeframe --ext .js,.jsx ."
+    "precommit": "lint-staged",
+    "release": "wnpm-release --no-shrinkwrap",
+    "test": "nyc --reporter=text mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
+    "test:watch": "watchman-make -p '**/*.js' --run 'mocha_reporter=spec npm run test'"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
@@ -45,6 +46,7 @@
     "lint-staged": "^5.0.0",
     "mocha": "^3.2.0",
     "mocha-env-reporter": "^2.0.4",
+    "nyc": "11.3.0",
     "prettier": "^1.7.0",
     "redux": "^3.6.0",
     "wnpm-ci": "*"

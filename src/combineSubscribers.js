@@ -1,5 +1,7 @@
 'use strict'
 
+const { flatten } = require('./utils/flatten')
+
 const combineSubscribers = subscriberMap => (
   transition,
   dispatch,
@@ -19,7 +21,7 @@ const combineSubscribers = subscriberMap => (
             )
           : Promise.resolve()
     )
-  ).then(results => results.reduce((acc, val) => acc.concat(val), []))
+  ).then(flatten)
 
 module.exports = combineSubscribers
 

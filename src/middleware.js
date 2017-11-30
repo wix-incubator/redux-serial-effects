@@ -17,6 +17,11 @@
 // 2. Maintains a queue of side-effects that run in order dispatched
 // 3. Combining subscribers for composability
 
+const { flatten } = require('./utils/flatten')
+
+const isDispatchable = something =>
+  something != null && typeof something === 'object'
+
 const createSerialEffectsMiddleware = extraArgument => {
   const idleCallbacks = []
   const subscribers = []
@@ -34,18 +39,13 @@ const createSerialEffectsMiddleware = extraArgument => {
           .then(() =>
             Promise.all(
               subs.map(subscriber => subscriber({ from, to }, extraArgument))
-            ).then(actionsToDispatch => {
-              Promise.all(
-                actionsToDispatch
-                  .reduce((acc, val) => acc.concat(val), [])
-                  .filter(
-                    action =>
-                      action != null &&
-                      (typeof action === 'object' || Array.isArray(action))
-                  )
-                  .map(store.dispatch)
-              ).then(resolve, reject)
-            }, reject)
+            )
+              .then(flatten)
+              .then(actionsToDispatch => {
+                Promise.all(
+                  actionsToDispatch.filter(isDispatchable).map(store.dispatch)
+                ).then(resolve, reject)
+              }, reject)
           )
           .catch(() => {})
           .then(() => {
@@ -59,35 +59,18 @@ const createSerialEffectsMiddleware = extraArgument => {
     return Promise.resolve(result)
   }
 
-  const registrar = (register, unregister, indexOf) => {
-    return fn => {
-      register(fn)
-
-      let isRegistered = true
-      return () => {
-        if (!isRegistered) {
-          return
-        }
-
-        isRegistered = false
-
-        const index = indexOf(fn)
-        unregister(index)
+  const registrar = list => fn => {
+    list.push(fn)
+    return () => {
+      const index = list.indexOf(fn)
+      if (index >= 0) {
+        list.splice(index, 1)
       }
     }
   }
 
-  const subscribe = registrar(
-    fn => subscribers.push(fn),
-    index => subscribers.splice(index, 1),
-    fn => subscribers.indexOf(fn)
-  )
-
-  const onIdle = registrar(
-    fn => idleCallbacks.push(fn),
-    index => idleCallbacks.splice(index, 1),
-    fn => idleCallbacks.indexOf(fn)
-  )
+  const subscribe = registrar(subscribers)
+  const onIdle = registrar(idleCallbacks)
 
   return {
     middleware,
