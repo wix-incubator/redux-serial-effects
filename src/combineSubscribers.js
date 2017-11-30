@@ -19,7 +19,7 @@ const combineSubscribers = subscriberMap => (
             )
           : Promise.resolve()
     )
-  )
+  ).then(results => results.reduce((acc, val) => acc.concat(val), []))
 
 module.exports = combineSubscribers
 

@@ -1,6 +1,11 @@
 'use strict'
 
-const { expect } = require('chai')
+const chai = require('chai')
+const chaiAsPromised = require('chai-as-promised')
+chai.use(chaiAsPromised)
+const { expect } = chai
+chai.should()
+
 const { createStore, applyMiddleware, combineReducers } = require('redux')
 const { combineSubscribers, serialEffectsMiddleware } = require('../src/index')
 
@@ -8,6 +13,7 @@ const { combineSubscribers, serialEffectsMiddleware } = require('../src/index')
 
 describe('serial effects', function() {
   const SET_COUNTER = 'SET_COUNTER'
+  const ADD_UNDO = 'ADD_UNDO'
 
   const unhandledRejectionListener = reason => {
     console.warn('Unhandled rejection:', reason) // eslint-disable-line no-console
@@ -56,15 +62,21 @@ describe('serial effects', function() {
       )
 
       let sideEffectsDone = false
+      let sideEffectsPromiseResolved = false
 
       onIdle(() => {
-        expect(sideEffectsDone).to.be.true
-        expect(store.getState().counter).to.equal(2)
+        expect(sideEffectsPromiseResolved).to.be.true
         done()
       })
 
-      store.dispatch({ type: SET_COUNTER, value: 1 })
-      store.dispatch({ type: SET_COUNTER, value: 2 })
+      Promise.all([
+        store.dispatch({ type: SET_COUNTER, value: 1 }),
+        store.dispatch({ type: SET_COUNTER, value: 2 })
+      ]).then(() => {
+        sideEffectsPromiseResolved = true
+        expect(sideEffectsDone).to.be.true
+        expect(store.getState().counter).to.equal(2)
+      })
     })
 
     it('should call idle callback once per transition back to idle', function(
@@ -90,7 +102,7 @@ describe('serial effects', function() {
             setTimeout(() => {
               sideEffectsDone = true
               resolve()
-            }, 20)
+            }, 10)
           })
         }
       }
@@ -110,6 +122,9 @@ describe('serial effects', function() {
       let idleCalls = 0
 
       onIdle(() => {
+        if (store.getState().counter === 1) {
+          store.dispatch({ type: SET_COUNTER, value: 2 })
+        }
         idleCalls = idleCalls + 1
       })
 
@@ -117,7 +132,7 @@ describe('serial effects', function() {
 
       setTimeout(() => {
         expect(sideEffectsDone).to.be.true
-        expect(idleCalls).to.equal(1)
+        expect(idleCalls).to.equal(2)
         done()
       }, 50)
     })
@@ -143,7 +158,7 @@ describe('serial effects', function() {
             setTimeout(() => {
               sideEffectsDone = true
               resolve()
-            }, 20)
+            }, 10)
           })
         }
       }
@@ -390,10 +405,7 @@ describe('serial effects', function() {
 
       const subscriber = ({ from, to }) => {
         if (from.counter !== to.counter) {
-          return new Promise((resolve, reject) => {
-            store.dispatch({ type: MIRRORED_ACTION, value: to.counter })
-            resolve()
-          })
+          return Promise.resolve({ type: MIRRORED_ACTION, value: to.counter })
         }
       }
 
@@ -481,6 +493,246 @@ describe('serial effects', function() {
         }, 0)
       }, 10)
     })
+
+    it('should return a promise that resolves when all subscribers are done', function() {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      const firstSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              firstSubscriberDone = true
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const secondSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              secondSubscriberDone = true
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(firstSubscriber)
+      subscribe(secondSubscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      let firstSubscriberDone = false
+      let secondSubscriberDone = false
+
+      const subscriberPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
+      expect(store.getState().counter).to.equal(1)
+      return subscriberPromise.then(() => {
+        expect(firstSubscriberDone).to.be.true
+        expect(secondSubscriberDone).to.be.true
+      })
+    })
+
+    it('should return a promise that rejects if at least one subscriber rejected its promise', function() {
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      const firstSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const secondSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              reject(new Error('hardcoded rejection'))
+            }, 20)
+          })
+        }
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(firstSubscriber)
+      subscribe(secondSubscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      const subscriberPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
+      expect(store.getState().counter).to.equal(1)
+      return subscriberPromise.should.be.rejectedWith('hardcoded rejection')
+    })
+
+    it('should return a promise that resolves only after all related dispatched actions are resolved', function() {
+      const initialState = {
+        counter: 0,
+        undo: []
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return Object.assign({}, state, { undo: action.undo })
+          }
+          default:
+            return state
+        }
+      }
+
+      const firstSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              resolve({
+                type: ADD_UNDO,
+                undo: to.undo.concat(from.counter)
+              })
+            }, 20)
+          })
+        }
+      }
+
+      const secondSubscriber = ({ from, to }) => {
+        if (from.undo !== to.undo) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              sideEffectsDone = true
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(firstSubscriber)
+      subscribe(secondSubscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      let sideEffectsDone = false
+
+      const subscriberPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
+      return subscriberPromise.then(() => {
+        expect(sideEffectsDone).to.be.true
+        expect(store.getState().counter).to.equal(1)
+        expect(store.getState().undo).to.eql([0])
+      })
+    })
+
+    it('should allow subscribers to resolve to an array of actions to dispatch', function() {
+      const initialState = {
+        counter: 0,
+        undo: []
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return Object.assign({}, state, { undo: action.undo })
+          }
+          default:
+            return state
+        }
+      }
+
+      const firstSubscriber = ({ from, to }) => {
+        if (from.counter !== to.counter) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              resolve([
+                {
+                  type: ADD_UNDO,
+                  undo: to.undo.concat(from.counter)
+                }
+              ])
+            }, 20)
+          })
+        }
+      }
+
+      const secondSubscriber = ({ from, to }) => {
+        if (from.undo !== to.undo) {
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              sideEffectsDone = true
+              resolve()
+            }, 20)
+          })
+        }
+      }
+
+      const {
+        middleware,
+        subscribe
+      } = serialEffectsMiddleware.withExtraArgument()
+      subscribe(firstSubscriber)
+      subscribe(secondSubscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      let sideEffectsDone = false
+
+      const subscriberPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
+      return subscriberPromise.then(() => {
+        expect(sideEffectsDone).to.be.true
+        expect(store.getState().counter).to.equal(1)
+        expect(store.getState().undo).to.eql([0])
+      })
+    })
   })
 
   describe('counter list example', function() {
@@ -517,7 +769,7 @@ describe('serial effects', function() {
 
     const lostSync = id => ({ type: LOST_SYNC, id })
 
-    const counterSubscriber = backendService => ({ from, to }, dispatch) => {
+    const counterSubscriber = backendService => ({ from, to }) => {
       // backendService is an API client that returns a promise for each API
       // call, it is scoped to the counter's state
       if (from.counter !== to.counter) {
@@ -528,12 +780,13 @@ describe('serial effects', function() {
             if (retryCount) {
               return update(retryCount - 1)
             } else {
-              dispatch(lostSync(to.id))
-              return Promise.resolve()
+              return lostSync(to.id)
             }
           })
         }
         return update()
+      } else {
+        return Promise.resolve()
       }
     }
 
@@ -566,7 +819,7 @@ describe('serial effects', function() {
       }
     }
 
-    it('should compose subscribers', function(done) {
+    it('should compose subscribers', function() {
       const counterList = [1, 2, 3, 4]
       const reducerMap = {}
       const subscriberMap = {}
@@ -585,13 +838,12 @@ describe('serial effects', function() {
 
       const {
         middleware,
-        onIdle,
         subscribe
       } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
       const store = createStore(reducer, applyMiddleware(middleware))
 
-      onIdle(() => {
+      return store.dispatch(increment(1)).then(() => {
         expect(store.getState().counter1).to.deep.equal({
           id: 1,
           counter: 1,
@@ -616,13 +868,10 @@ describe('serial effects', function() {
           inSync: true
         })
         expect(backendServices[3].value).to.equal(0)
-        done()
       })
-
-      store.dispatch(increment(1))
     })
 
-    it('should be able to dispatch actions from subscribers', function(done) {
+    it('should follow promise chains returned from subscribers', function() {
       const counterList = [1, 2, 3, 4]
       const reducerMap = {}
       const subscriberMap = {}
@@ -641,13 +890,13 @@ describe('serial effects', function() {
 
       const {
         middleware,
-        onIdle,
         subscribe
       } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
       const store = createStore(reducer, applyMiddleware(middleware))
 
-      onIdle(() => {
+      backendServices[0].shouldFail = true
+      return store.dispatch(increment(1)).then(() => {
         expect(store.getState().counter1).to.deep.equal({
           id: 1,
           counter: 1,
@@ -672,11 +921,7 @@ describe('serial effects', function() {
           inSync: true
         })
         expect(backendServices[3].value).to.equal(0)
-        done()
       })
-
-      backendServices[0].shouldFail = true
-      store.dispatch(increment(1))
     })
   })
 
@@ -887,9 +1132,9 @@ describe('serial effects', function() {
       })
     })
 
-    it('should hangle the GC of deleted VMs in the background', function(done) {
+    it('should hangle the GC of deleted VMs in the background', function() {
       // logic for disconnecting deleted vms
-      const subscriber = ({ from, to }, dispatch) => {
+      const subscriber = ({ from, to }) => {
         // select all vms that were deleted by this action
         if (from.toGC !== to.toGC) {
           return Promise.all(
@@ -897,8 +1142,7 @@ describe('serial effects', function() {
               vm =>
                 new Promise((resolve, reject) =>
                   setTimeout(() => {
-                    dispatch({ type: GC, vm })
-                    resolve()
+                    resolve({ type: GC, vm })
                   }, 10)
                 )
             )
@@ -908,7 +1152,6 @@ describe('serial effects', function() {
 
       const {
         middleware,
-        onIdle,
         subscribe
       } = serialEffectsMiddleware.withExtraArgument()
       subscribe(subscriber)
@@ -930,17 +1173,10 @@ describe('serial effects', function() {
       expect(store.getState().vmList.length).to.equal(3)
       const vmToRemove = store.getState().vmList[0]
 
-      onIdle(() => {
-        try {
-          expect(store.getState().vmList.length).to.equal(2)
-          expect(store.getState().toGC).to.be.empty
-          done()
-        } catch (ex) {
-          done(ex)
-        }
+      return store.dispatch({ type: DELETE, vm: vmToRemove }).then(() => {
+        expect(store.getState().vmList.length).to.equal(2)
+        expect(store.getState().toGC).to.be.empty
       })
-
-      store.dispatch({ type: DELETE, vm: vmToRemove })
     })
   })
 })

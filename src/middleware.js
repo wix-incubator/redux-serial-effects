@@ -29,23 +29,34 @@ const createSerialEffectsMiddleware = extraArgument => {
 
     if (from !== to) {
       const subs = subscribers.slice()
-      const q = (queue = queue
-        .then(() =>
-          Promise.all(
-            subs.map(subscriber =>
-              subscriber({ from, to }, store.dispatch, extraArgument)
-            )
+      return new Promise((resolve, reject) => {
+        const q = (queue = queue
+          .then(() =>
+            Promise.all(
+              subs.map(subscriber => subscriber({ from, to }, extraArgument))
+            ).then(actionsToDispatch => {
+              Promise.all(
+                actionsToDispatch
+                  .reduce((acc, val) => acc.concat(val), [])
+                  .filter(
+                    action =>
+                      action != null &&
+                      (typeof action === 'object' || Array.isArray(action))
+                  )
+                  .map(store.dispatch)
+              ).then(resolve, reject)
+            }, reject)
           )
-        )
-        .catch(() => {})
-        .then(() => {
-          if (q === queue) {
-            idleCallbacks.slice().forEach(cb => cb())
-          }
-        }))
+          .catch(() => {})
+          .then(() => {
+            if (q === queue) {
+              idleCallbacks.slice().forEach(cb => cb())
+            }
+          }))
+      })
     }
 
-    return result
+    return Promise.resolve(result)
   }
 
   const registrar = (register, unregister, indexOf) => {
