@@ -9,7 +9,6 @@
     "eslintopts": "--cache --format codeframe --ext .js,.jsx"
   },
   "lint-staged": {
-    "gitDir": "./",
     "linters": {
       "*.{js,jsx}": "eslint $npm_package_config_eslintopts"
     }
