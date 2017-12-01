@@ -6,7 +6,6 @@
   "plugins": [
     "lodash",
     "mocha",
-    "chai-friendly",
     "prettier"
   ],
   "extends": [
@@ -43,8 +42,6 @@
     "spaced-comment": 0,
     "yield-star-spacing": 0,
     "standard/array-bracket-even-spacing": 0,
-    "no-unused-expressions": 0,
-    "chai-friendly/no-unused-expressions": 2,
     "prettier/prettier": [
       "error",
       {

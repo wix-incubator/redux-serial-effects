@@ -5,7 +5,6 @@
   "license": "MIT",
   "main": "dist/index.js",
   "config": {
-    "mochaopts": "--reporter mocha-env-reporter",
     "eslintopts": "--cache --format codeframe --ext .js,.jsx"
   },
   "lint-staged": {
@@ -20,8 +19,8 @@
     "lint-staged": "lint-staged",
     "precommit": "lint-staged",
     "release": "wnpm-release --no-shrinkwrap",
-    "test": "nyc --reporter=text mocha 'test/**/*.test.js' 'test/**/*.spec.js' $npm_package_config_mochaopts",
-    "test:watch": "watchman-make -p '**/*.js' --run 'mocha_reporter=spec npm run test'"
+    "test": "nyc --reporter $([ -z \"$TEAMCITY_VERSION\" ] && echo text || echo teamcity) tape test/*.js | tap-$([ -z \"$test_reporter\" ] && echo spec || echo $test_reporter)",
+    "test:watch": "watchman-make -p '**/*.js' --run 'test_reporter=spec npm run test'"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
@@ -30,12 +29,9 @@
   "devDependencies": {
     "babel-cli": "^6.26.0",
     "babel-preset-es2015": "^6.24.1",
-    "chai": "^3.5.0",
-    "chai-as-promised": "7.1.1",
     "eslint": "^3.16.1",
     "eslint-config-prettier": "^2.4.0",
     "eslint-config-standard": "^7.0.0",
-    "eslint-plugin-chai-friendly": "^0.3.6",
     "eslint-plugin-lodash": "^2.4.0",
     "eslint-plugin-mocha": "^4.8.0",
     "eslint-plugin-prettier": "^2.2.0",
@@ -43,11 +39,12 @@
     "eslint-plugin-standard": "^2.1.1",
     "husky": "^0.14.3",
     "lint-staged": "^5.0.0",
-    "mocha": "^3.2.0",
-    "mocha-env-reporter": "^2.0.4",
     "nyc": "11.3.0",
     "prettier": "^1.7.0",
     "redux": "^3.6.0",
+    "tap-dot": "1.0.5",
+    "tap-spec": "4.1.1",
+    "tape": "4.8.0",
     "wnpm-ci": "*"
   }
 }
