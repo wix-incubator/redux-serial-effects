@@ -14,46 +14,96 @@
 // This middleware provides the following services on top of what Redux's
 // subscribers get:
 // 1. Access to both the previous and current state
-// 2. Maintains a queue of side-effects that run in order dispatched
-// 3. Combining subscribers for composability
+// 2. A queue of side-effects that run in order dispatched
+// 3. Ability to combine subscribers for composability
 
 const { flatten } = require('./utils/flatten')
 
-const isDispatchable = something =>
-  something != null && typeof something === 'object'
+const isPromise = maybePromise => typeof maybePromise.then === 'function'
+const isSyncCommand = _ => !!_ && typeof _.isAsync === 'boolean' && !_.isAsync
+const isAsyncCommand = _ => !!_ && typeof _.isAsync === 'boolean' && _.isAsync
 
 const createSerialEffectsMiddleware = extraArgument => {
-  const idleCallbacks = []
   const subscribers = []
-  let queue = Promise.resolve()
+  let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
+    const runSyncCommand = command => {
+      const result =
+        typeof command.action !== 'undefined'
+          ? store.dispatch(command.action)
+          : command.run()
+      return runSyncCommands([].concat(result))
+    }
+
+    const runSyncCommands = commands => {
+      const syncCommands = commands.filter(isSyncCommand)
+      const newCommands = flatten(syncCommands.map(runSyncCommand)).filter(
+        _ => !!_
+      )
+      return commands.filter(_ => !!_ && !isSyncCommand(_)).concat(newCommands)
+    }
+
+    const runAsyncCommands = commands => {
+      const asyncCommands = commands.filter(isAsyncCommand)
+      const promises = flatten(asyncCommands.map(_ => _.run())).filter(_ => !!_)
+
+      return promises
+    }
+
+    const executeQueuedCommands = (resolve, reject) => commands => {
+      if (commands.length > 0) {
+        return Promise.all(runAsyncCommands(commands))
+          .then(flatten)
+          .then(additionalCommands => {
+            Promise.all(commands.filter(isPromise))
+              .then(() => queueAndRunCommands(additionalCommands))
+              .then(resolve, reject)
+          }, reject)
+      } else {
+        resolve()
+        return Promise.resolve()
+      }
+    }
+
+    const scheduleExecution = () => {
+      let trigger = undefined
+      const gate = new Promise(resolve => (trigger = resolve))
+      const promise = new Promise((resolve, reject) => {
+        queuePromise = queuePromise
+          .then(() => gate)
+          .then(executeQueuedCommands(resolve, reject), reject)
+          .catch(() => {})
+      })
+
+      return { promise, trigger }
+    }
+
+    const queueAndRunCommands = commands => {
+      const { promise, trigger } = scheduleExecution()
+      const asyncCommands = runSyncCommands(commands)
+      trigger(asyncCommands)
+      return promise
+    }
+
     const from = store.getState()
     const result = next(action)
     const to = store.getState()
 
     if (from !== to) {
-      const subs = subscribers.slice()
-      return new Promise((resolve, reject) => {
-        const q = (queue = queue
-          .then(() =>
-            Promise.all(
-              subs.map(subscriber => subscriber({ from, to }, extraArgument))
-            )
-              .then(flatten)
-              .then(actionsToDispatch => {
-                Promise.all(
-                  actionsToDispatch.filter(isDispatchable).map(store.dispatch)
-                ).then(resolve, reject)
-              }, reject)
-          )
-          .catch(() => {})
-          .then(() => {
-            if (q === queue) {
-              idleCallbacks.slice().forEach(cb => cb())
+      const commands = flatten(
+        subscribers
+          .slice()
+          .map(subscriber => {
+            try {
+              return subscriber({ from, to }, extraArgument)
+            } catch (e) {
+              return Promise.reject(e)
             }
-          }))
-      })
+          })
+          .filter(_ => !!_)
+      )
+      return queueAndRunCommands(commands)
     }
 
     return Promise.resolve(result)
@@ -70,12 +120,10 @@ const createSerialEffectsMiddleware = extraArgument => {
   }
 
   const subscribe = registrar(subscribers)
-  const onIdle = registrar(idleCallbacks)
 
   return {
     middleware,
-    subscribe,
-    onIdle
+    subscribe
   }
 }
 
