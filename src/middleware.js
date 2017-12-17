@@ -14,68 +14,123 @@
 // This middleware provides the following services on top of what Redux's
 // subscribers get:
 // 1. Access to both the previous and current state
-// 2. Maintains a queue of side-effects that run in order dispatched
-// 3. Combining subscribers for composability
+// 2. A queue of side-effects that run in order dispatched
+// 3. Ability to combine subscribers for composability
 
 const { flatten } = require('./utils/flatten')
+const { isPromise } = require('./utils/isPromise')
+const { sequence, try_ } = require('./utils/either')
 
-const isDispatchable = something =>
-  something != null && typeof something === 'object'
+const isCmd = _ =>
+  _ != null && typeof _.deferred === 'boolean' && typeof _.type === 'string'
+const isImmediateCommand = _ => isCmd(_) && !_.deferred
+const isDeferredCommand = _ => isCmd(_) && _.deferred
+
+const isCmdOrPromise = maybeCmdOrPromise =>
+  isCmd(maybeCmdOrPromise) || isPromise(maybeCmdOrPromise)
+
+const not = fn => x => !fn(x)
+
+const registrar = list => fn => {
+  list.push(fn)
+  return () => {
+    const index = list.indexOf(fn)
+    if (index >= 0) {
+      list.splice(index, 1)
+    }
+  }
+}
 
 const createSerialEffectsMiddleware = extraArgument => {
-  const idleCallbacks = []
   const subscribers = []
-  let queue = Promise.resolve()
+  const providers = {}
+  let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
+    const runImmediateCommands = commands => {
+      const immediateCommands = commands.filter(isImmediateCommand)
+      const queuedCommands = flatten(
+        immediateCommands.map(_ =>
+          runImmediateCommands([].concat(providers[_.type](_)))
+        )
+      ).filter(isCmdOrPromise)
+      return commands.filter(not(isImmediateCommand)).concat(queuedCommands)
+    }
+
+    const runQueuedCommands = commands => {
+      const asyncCommands = commands.filter(isDeferredCommand)
+      const promises = flatten(
+        asyncCommands.map(_ => providers[_.type](_))
+      ).filter(isCmdOrPromise)
+
+      return promises
+    }
+
+    const executeQueuedCommands = (resolve, reject) => commands => {
+      if (commands.length > 0) {
+        return Promise.all(runQueuedCommands(commands))
+          .then(flatten)
+          .then(additionalCommands => {
+            Promise.all(commands.filter(isPromise))
+              .then(() => queueAndRunCommands(additionalCommands))
+              .then(resolve, reject)
+          }, reject)
+      } else {
+        resolve()
+        return Promise.resolve()
+      }
+    }
+
+    const scheduleExecution = () => {
+      let trigger = undefined
+      const gate = new Promise(resolve => (trigger = resolve))
+      const promise = new Promise((resolve, reject) => {
+        queuePromise = queuePromise
+          .then(() => gate)
+          .then(executeQueuedCommands(resolve, reject), reject)
+          .catch(() => {})
+      })
+
+      return { promise, trigger }
+    }
+
+    const queueAndRunCommands = commands => {
+      const { promise, trigger } = scheduleExecution()
+      const queuedCommands = runImmediateCommands(commands)
+      trigger(queuedCommands)
+      return promise
+    }
+
     const from = store.getState()
     const result = next(action)
     const to = store.getState()
 
     if (from !== to) {
-      const subs = subscribers.slice()
-      return new Promise((resolve, reject) => {
-        const q = (queue = queue
-          .then(() =>
-            Promise.all(
-              subs.map(subscriber => subscriber({ from, to }, extraArgument))
-            )
-              .then(flatten)
-              .then(actionsToDispatch => {
-                Promise.all(
-                  actionsToDispatch.filter(isDispatchable).map(store.dispatch)
-                ).then(resolve, reject)
-              }, reject)
+      return sequence(
+        subscribers
+          .slice()
+          .map(subscriber =>
+            try_(() => subscriber({ from, to }, extraArgument))
           )
-          .catch(() => {})
-          .then(() => {
-            if (q === queue) {
-              idleCallbacks.slice().forEach(cb => cb())
-            }
-          }))
-      })
+      ).fold(
+        e => Promise.reject(e),
+        commands => queueAndRunCommands(commands.filter(isCmd))
+      )
     }
 
     return Promise.resolve(result)
   }
 
-  const registrar = list => fn => {
-    list.push(fn)
-    return () => {
-      const index = list.indexOf(fn)
-      if (index >= 0) {
-        list.splice(index, 1)
-      }
-    }
-  }
-
   const subscribe = registrar(subscribers)
-  const onIdle = registrar(idleCallbacks)
+
+  const registerProviders = (...args) => {
+    args.forEach(provider => (providers[provider.type] = provider.runner))
+  }
 
   return {
     middleware,
-    subscribe,
-    onIdle
+    registerProviders,
+    subscribe
   }
 }
 
