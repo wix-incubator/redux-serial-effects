@@ -6,7 +6,8 @@ const TYPE = 'DISPATCH'
 
 const create = action => {
   return createCmd(action.type, TYPE, false, {
-    action
+    action,
+    run: dispatch => dispatch(action)
   })
 }
 

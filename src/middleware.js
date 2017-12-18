@@ -18,42 +18,46 @@
 // 3. Ability to combine subscribers for composability
 
 const { flatten } = require('./utils/flatten')
+const { isPromise } = require('./utils/isPromise')
+const { sequence, try_ } = require('./utils/either')
 
-const isPromise = maybePromise => typeof maybePromise.then === 'function'
-const isSyncCommand = _ => !!_ && typeof _.isAsync === 'boolean' && !_.isAsync
-const isAsyncCommand = _ => !!_ && typeof _.isAsync === 'boolean' && _.isAsync
+const isCmd = _ =>
+  _ != null && typeof _.isQueued === 'boolean' && typeof _.run === 'function'
+const isImmediateCommand = _ => isCmd(_) && !_.isQueued
+const isQueuedCommand = _ => isCmd(_) && _.isQueued
+
+const isCmdOrPromise = maybeCmdOrPromise =>
+  isCmd(maybeCmdOrPromise) || isPromise(maybeCmdOrPromise)
+
+const not = fn => x => !fn(x)
 
 const createSerialEffectsMiddleware = extraArgument => {
   const subscribers = []
   let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
-    const runSyncCommand = command => {
-      const result =
-        typeof command.action !== 'undefined'
-          ? store.dispatch(command.action)
-          : command.run()
-      return runSyncCommands([].concat(result))
+    const runImmediateCommands = commands => {
+      const immediateCommands = commands.filter(isImmediateCommand)
+      const queuedCommands = flatten(
+        immediateCommands.map(_ =>
+          runImmediateCommands([].concat(_.run(store.dispatch)))
+        )
+      ).filter(isCmdOrPromise)
+      return commands.filter(not(isImmediateCommand)).concat(queuedCommands)
     }
 
-    const runSyncCommands = commands => {
-      const syncCommands = commands.filter(isSyncCommand)
-      const newCommands = flatten(syncCommands.map(runSyncCommand)).filter(
-        _ => !!_
-      )
-      return commands.filter(_ => !!_ && !isSyncCommand(_)).concat(newCommands)
-    }
-
-    const runAsyncCommands = commands => {
-      const asyncCommands = commands.filter(isAsyncCommand)
-      const promises = flatten(asyncCommands.map(_ => _.run())).filter(_ => !!_)
+    const runQueuedCommands = commands => {
+      const asyncCommands = commands.filter(isQueuedCommand)
+      const promises = flatten(
+        asyncCommands.map(_ => _.run(store.dispatch))
+      ).filter(isCmdOrPromise)
 
       return promises
     }
 
     const executeQueuedCommands = (resolve, reject) => commands => {
       if (commands.length > 0) {
-        return Promise.all(runAsyncCommands(commands))
+        return Promise.all(runQueuedCommands(commands))
           .then(flatten)
           .then(additionalCommands => {
             Promise.all(commands.filter(isPromise))
@@ -81,8 +85,8 @@ const createSerialEffectsMiddleware = extraArgument => {
 
     const queueAndRunCommands = commands => {
       const { promise, trigger } = scheduleExecution()
-      const asyncCommands = runSyncCommands(commands)
-      trigger(asyncCommands)
+      const queuedCommands = runImmediateCommands(commands)
+      trigger(queuedCommands)
       return promise
     }
 
@@ -91,19 +95,16 @@ const createSerialEffectsMiddleware = extraArgument => {
     const to = store.getState()
 
     if (from !== to) {
-      const commands = flatten(
+      return sequence(
         subscribers
           .slice()
-          .map(subscriber => {
-            try {
-              return subscriber({ from, to }, extraArgument)
-            } catch (e) {
-              return Promise.reject(e)
-            }
-          })
-          .filter(_ => !!_)
+          .map(subscriber =>
+            try_(() => subscriber({ from, to }, extraArgument))
+          )
+      ).fold(
+        e => Promise.reject(e),
+        commands => queueAndRunCommands(commands.filter(isCmd))
       )
-      return queueAndRunCommands(commands)
     }
 
     return Promise.resolve(result)

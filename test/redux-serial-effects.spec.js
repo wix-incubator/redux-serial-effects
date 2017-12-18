@@ -8,17 +8,33 @@ const { createStore, applyMiddleware, combineReducers } = require('redux')
 const {
   combineSubscribers,
   serialEffectsMiddleware,
-  createCallableCmd,
+  createImmediateRunCmd,
+  createQueuedRunCmd,
   createDispatchCmd
 } = require('../src/index')
 
 const SET_COUNTER = 'SET_COUNTER'
 const ADD_UNDO = 'ADD_UNDO'
 
-const unhandledRejectionListener = reason => {
+process.on('unhandledRejection', reason => {
   console.warn('Unhandled rejection:', reason) // eslint-disable-line no-console
+})
+
+process.on('uncaughtException', reason => {
+  console.warn('Uncaught exception:', reason) // eslint-disable-line no-console
+})
+
+const dispatchUndoCmd = undo => createDispatchCmd({ type: ADD_UNDO, undo })
+
+const delayedValue = (timeout, value) => {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      resolve(value)
+    }, timeout)
+  })
 }
-process.on('unhandledRejection', unhandledRejectionListener)
+
+const delayedUndoCmd = undo => delayedValue(20, dispatchUndoCmd(undo))
 
 test('should change the state synchronously', function(t) {
   t.plan(1)
@@ -302,9 +318,55 @@ test('should handle exceptions in subscriber code', function(t) {
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
 
   store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
-  store.dispatch({ type: SET_COUNTER, value: 2 })
+  return store
+    .dispatch({ type: SET_COUNTER, value: 2 })
+    .then(() => t.end())
+    .catch(t.fail)
+})
 
-  t.end()
+test('should run any command object that has an isQueued attribute and a run() function', function(
+  t
+) {
+  t.plan(1)
+
+  const initialState = {
+    counter: 0,
+    mirroredCounter: 0
+  }
+  const MIRRORED_ACTION = 'mirrored_action'
+  const reducer = (state, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      case MIRRORED_ACTION: {
+        return Object.assign({}, state, { mirroredCounter: action.value })
+      }
+      default:
+        return state
+    }
+  }
+
+  const subscriber = ({ from, to }) => {
+    if (from.counter !== to.counter) {
+      return {
+        isQueued: false,
+        run: dispatch => dispatch({ type: MIRRORED_ACTION, value: to.counter })
+      }
+    }
+  }
+
+  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+
+  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+    t.equal(
+      store.getState().mirroredCounter,
+      store.getState().counter,
+      'action dispatched'
+    )
+  })
 })
 
 test('should run async side-effects only after previous side-effect promises have resolved/rejected', function(
@@ -336,12 +398,11 @@ test('should run async side-effects only after previous side-effect promises hav
 
   const subscriber = ({ from, to }) => {
     if (to.counter === 1) {
-      return createCallableCmd(true, () => firstSideEffectPromise, {
+      return createQueuedRunCmd(() => firstSideEffectPromise, {
         name: 'first side-effect'
       })
     } else {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () => {
           t.true(
             firstSideEffectsDone,
@@ -365,7 +426,9 @@ test('should run async side-effects only after previous side-effect promises hav
   return promise.then(() => t.end())
 })
 
-test('should dispatch an action returned from a subscriber', function(t) {
+test('should synchronously dispatch an action returned from a subscriber', function(
+  t
+) {
   t.plan(1)
 
   const initialState = {
@@ -396,13 +459,15 @@ test('should dispatch an action returned from a subscriber', function(t) {
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
 
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.equal(
-      store.getState().mirroredCounter,
-      store.getState().counter,
-      'action dispatched'
-    )
-  })
+  const dispatchPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
+
+  t.equal(
+    store.getState().mirroredCounter,
+    store.getState().counter,
+    'synchronous action dispatched'
+  )
+
+  return dispatchPromise
 })
 
 test('should dispatch an action returned from side-effects chain', function(t) {
@@ -428,7 +493,7 @@ test('should dispatch an action returned from side-effects chain', function(t) {
 
   const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(true, () =>
+      return createQueuedRunCmd(() =>
         Promise.resolve(
           createDispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
         )
@@ -470,8 +535,7 @@ test('should return a promise that resolves when side-effects of all subscribers
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () =>
           new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -485,8 +549,7 @@ test('should return a promise that resolves when side-effects of all subscribers
 
   const secondSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () =>
           new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -542,27 +605,15 @@ test('should return a promise that resolves only after all related/subsequent co
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              resolve(
-                createDispatchCmd({
-                  type: ADD_UNDO,
-                  undo: to.undo.concat(from.counter)
-                })
-              )
-            }, 20)
-          })
-      )
+      return createQueuedRunCmd(delayedUndoCmd, {
+        args: [to.undo.concat(from.counter)]
+      })
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.undo !== to.undo) {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () =>
           new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -614,21 +665,15 @@ test('should return a promise that rejects if at least one async action rejected
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(resolve, 20)
-          }),
-        { name: 'will resolve to nothing' }
-      )
+      return createQueuedRunCmd(() => delayedValue(20), {
+        name: 'will resolve to nothing'
+      })
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () =>
           new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -684,28 +729,16 @@ test('should return a promise that rejects if any subsequent action triggered a 
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(
-        true,
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              resolve(
-                createDispatchCmd({
-                  type: ADD_UNDO,
-                  undo: to.undo.concat(from.counter)
-                })
-              )
-            }, 20)
-          }),
-        { name: 'will resolve to an action' }
-      )
+      return createQueuedRunCmd(delayedUndoCmd, {
+        name: 'will resolve to an action',
+        args: [to.undo.concat(from.counter)]
+      })
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.undo !== to.undo) {
-      return createCallableCmd(
-        true,
+      return createQueuedRunCmd(
         () =>
           new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -789,13 +822,9 @@ test('should allow subscribers to return an array of commands', function(t) {
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
       return [
-        createDispatchCmd({
-          type: ADD_UNDO,
-          undo: to.undo.concat(from.counter)
-        }),
-        createCallableCmd(true, () => {
-          return createCallableCmd(
-            true,
+        dispatchUndoCmd(to.undo.concat(from.counter)),
+        createQueuedRunCmd(() => {
+          return createQueuedRunCmd(
             () =>
               new Promise((resolve, reject) => {
                 setTimeout(() => {
@@ -832,7 +861,7 @@ test('should allow subscribers to return an array of commands', function(t) {
     })
 })
 
-test('should allow subscribers to return syncronous commands that resolve to an array of commands', function(
+test('should allow subscribers to return syncronous commands that return an array of commands', function(
   t
 ) {
   t.plan(2)
@@ -857,26 +886,25 @@ test('should allow subscribers to return syncronous commands that resolve to an 
   let sideEffectsDone = false
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(false, () => {
-        return [
-          createDispatchCmd({
-            type: ADD_UNDO,
-            undo: to.undo.concat(from.counter)
-          }),
-          createCallableCmd(true, () => {
-            return createCallableCmd(
-              true,
-              () =>
-                new Promise((resolve, reject) => {
-                  setTimeout(() => {
-                    sideEffectsDone = true
-                    resolve()
-                  }, 20)
-                })
-            )
-          })
-        ]
-      })
+      return createImmediateRunCmd(
+        undo => {
+          return [
+            dispatchUndoCmd(undo),
+            createQueuedRunCmd(() => {
+              return createQueuedRunCmd(
+                () =>
+                  new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                      sideEffectsDone = true
+                      resolve()
+                    }, 20)
+                  })
+              )
+            })
+          ]
+        },
+        { args: [to.undo.concat(from.counter)] }
+      )
     }
   }
 
@@ -928,30 +956,25 @@ test('should allow subscribers to return asynchronous commands that resolve to a
   let sideEffectsDone = false
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createCallableCmd(true, () => {
-        return new Promise((resolve, reject) => {
-          setTimeout(() => {
-            resolve([
-              createDispatchCmd({
-                type: ADD_UNDO,
-                undo: to.undo.concat(from.counter)
-              }),
-              createCallableCmd(true, () => {
-                return createCallableCmd(
-                  true,
-                  () =>
-                    new Promise((resolve, reject) => {
-                      setTimeout(() => {
-                        sideEffectsDone = true
-                        resolve()
-                      }, 20)
-                    })
-                )
-              })
-            ])
-          })
-        }, 20)
-      })
+      return createQueuedRunCmd(
+        undo => {
+          return delayedValue(20, [
+            dispatchUndoCmd(undo),
+            createQueuedRunCmd(() => {
+              return createQueuedRunCmd(
+                () =>
+                  new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                      sideEffectsDone = true
+                      resolve()
+                    }, 20)
+                  })
+              )
+            })
+          ])
+        },
+        { args: [to.undo.concat(from.counter)] }
+      )
     }
   }
 
