@@ -5,11 +5,15 @@ const createCmd = require('./base')
 const TYPE = 'DISPATCH'
 
 const create = action => {
-  return createCmd(action.type, TYPE, false, {
-    action,
-    run: dispatch => dispatch(action)
+  return createCmd(TYPE, false, {
+    action
   })
 }
 
-module.exports.type = TYPE
+const provider = dispatch => ({
+  type: TYPE,
+  runner: command => dispatch(command.action)
+})
+
 module.exports.create = create
+module.exports.provider = provider

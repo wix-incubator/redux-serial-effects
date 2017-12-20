@@ -8,10 +8,13 @@ const { createStore, applyMiddleware, combineReducers } = require('redux')
 const {
   combineSubscribers,
   serialEffectsMiddleware,
-  createImmediateRunCmd,
-  createQueuedRunCmd,
-  createDispatchCmd
+  dispatchCmd,
+  dispatchProvider,
+  immediateThunkCmd,
+  queuedThunkCmd,
+  thunkProvider
 } = require('../src/index')
+const createCmd = require('../src/commands/base')
 
 const SET_COUNTER = 'SET_COUNTER'
 const ADD_UNDO = 'ADD_UNDO'
@@ -24,17 +27,49 @@ process.on('uncaughtException', reason => {
   console.warn('Uncaught exception:', reason) // eslint-disable-line no-console
 })
 
-const dispatchUndoCmd = undo => createDispatchCmd({ type: ADD_UNDO, undo })
+const dispatchUndoCmd = undo => dispatchCmd({ type: ADD_UNDO, undo })
 
-const delayedValue = (timeout, value) => {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      resolve(value)
-    }, timeout)
-  })
+const DELAYED_UNDO_TYPE = 'DELAYED_UNDO'
+const delayedUndoProvider = {
+  type: DELAYED_UNDO_TYPE,
+  runner: cmd => {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        resolve(dispatchUndoCmd(cmd.undo))
+      }, cmd.delay)
+    })
+  }
 }
 
-const delayedUndoCmd = undo => delayedValue(20, dispatchUndoCmd(undo))
+const delayedUndoCmd = (delay, undo) =>
+  createCmd(DELAYED_UNDO_TYPE, true, {
+    delay,
+    undo
+  })
+
+const delayedThunk = (delay, fn) =>
+  queuedThunkCmd(extraArgument => {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          resolve(fn(extraArgument))
+        } catch (e) {
+          reject(e)
+        }
+      }, delay)
+    })
+  })
+
+const delayedRejection = (delay, reason) =>
+  queuedThunkCmd(extraArgument => {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error(reason))
+      }, delay)
+    })
+  })
+
+const delayedValue = (delay, value) => delayedThunk(delay, () => value)
 
 test('should change the state synchronously', function(t) {
   t.plan(1)
@@ -324,51 +359,6 @@ test('should handle exceptions in subscriber code', function(t) {
     .catch(t.fail)
 })
 
-test('should run any command object that has an isQueued attribute and a run() function', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0,
-    mirroredCounter: 0
-  }
-  const MIRRORED_ACTION = 'mirrored_action'
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case MIRRORED_ACTION: {
-        return Object.assign({}, state, { mirroredCounter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return {
-        isQueued: false,
-        run: dispatch => dispatch({ type: MIRRORED_ACTION, value: to.counter })
-      }
-    }
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.equal(
-      store.getState().mirroredCounter,
-      store.getState().counter,
-      'action dispatched'
-    )
-  })
-})
-
 test('should run async side-effects only after previous side-effect promises have resolved/rejected', function(
   t
 ) {
@@ -398,32 +388,32 @@ test('should run async side-effects only after previous side-effect promises hav
 
   const subscriber = ({ from, to }) => {
     if (to.counter === 1) {
-      return createQueuedRunCmd(() => firstSideEffectPromise, {
-        name: 'first side-effect'
-      })
+      return immediateThunkCmd(() => firstSideEffectPromise)
     } else {
-      return createQueuedRunCmd(
-        () => {
-          t.true(
-            firstSideEffectsDone,
-            'second change subscribers called waited on first change side-effects'
-          )
-          t.end()
-        },
-        { name: 'second side-effect' }
-      )
+      return queuedThunkCmd(() => {
+        t.true(
+          firstSideEffectsDone,
+          'second change subscribers called waited on first change side-effects'
+        )
+        t.end()
+      })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(thunkProvider())
 
   store.dispatch({ type: SET_COUNTER, value: 1 })
   const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
 
   resolveFirstSideEffect()
-  return promise.then(() => t.end())
+  return promise
 })
 
 test('should synchronously dispatch an action returned from a subscriber', function(
@@ -451,13 +441,18 @@ test('should synchronously dispatch an action returned from a subscriber', funct
 
   const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createDispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
+      return dispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch))
 
   const dispatchPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
 
@@ -493,17 +488,22 @@ test('should dispatch an action returned from side-effects chain', function(t) {
 
   const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(() =>
+      return queuedThunkCmd(() =>
         Promise.resolve(
-          createDispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
+          dispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
         )
       )
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
 
   return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
     t.equal(
@@ -535,36 +535,29 @@ test('should return a promise that resolves when side-effects of all subscribers
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              firstBatchDone = true
-              resolve()
-            }, 10)
-          })
-      )
+      return delayedThunk(10, () => {
+        firstBatchDone = true
+      })
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              secondBatchDone = true
-              resolve()
-            }, 20)
-          })
-      )
+      return delayedThunk(20, () => {
+        secondBatchDone = true
+      })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(firstSubscriber)
   subscribe(secondSubscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(thunkProvider())
 
   let firstBatchDone = false
   let secondBatchDone = false
@@ -584,7 +577,7 @@ test('should return a promise that resolves when side-effects of all subscribers
 test('should return a promise that resolves only after all related/subsequent commands are resolved', function(
   t
 ) {
-  t.plan(1)
+  t.plan(2)
 
   const initialState = {
     counter: 0,
@@ -596,7 +589,9 @@ test('should return a promise that resolves only after all related/subsequent co
         return Object.assign({}, state, { counter: action.value })
       }
       case ADD_UNDO: {
-        return Object.assign({}, state, { undo: action.undo })
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
       }
       default:
         return state
@@ -605,30 +600,31 @@ test('should return a promise that resolves only after all related/subsequent co
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(delayedUndoCmd, {
-        args: [to.undo.concat(from.counter)]
-      })
+      return delayedUndoCmd(20, from.counter)
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.undo !== to.undo) {
-      return createQueuedRunCmd(
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              sideEffectsDone = true
-              resolve()
-            }, 20)
-          })
-      )
+      return delayedThunk(20, () => {
+        sideEffectsDone = true
+      })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(firstSubscriber)
   subscribe(secondSubscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(
+    dispatchProvider(store.dispatch),
+    delayedUndoProvider,
+    thunkProvider()
+  )
 
   let sideEffectsDone = false
 
@@ -639,6 +635,11 @@ test('should return a promise that resolves only after all related/subsequent co
     })
     .then(() => {
       t.true(sideEffectsDone, 'promise resolved after side-effects completion')
+      t.deepEqual(
+        store.getState(),
+        { counter: 1, undo: [0] },
+        'action dispatched'
+      )
       t.end()
     })
 })
@@ -665,27 +666,21 @@ test('should return a promise that rejects if at least one async action rejected
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(() => delayedValue(20), {
-        name: 'will resolve to nothing'
-      })
+      return delayedThunk(20, () => {})
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              reject(new Error('hardcoded rejection'))
-            }, 20)
-          }),
-        { name: 'will reject' }
-      )
+      return delayedRejection(20, 'hardcoded rejection')
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(combineSubscribers({ root: firstSubscriber }))
   subscribe(combineSubscribers({ root: secondSubscriber }))
   const store = createStore(
@@ -693,6 +688,7 @@ test('should return a promise that rejects if at least one async action rejected
     initialState,
     applyMiddleware(middleware)
   )
+  registerProviders(thunkProvider())
 
   return store
     .dispatch({
@@ -708,7 +704,7 @@ test('should return a promise that rejects if at least one async action rejected
 test('should return a promise that rejects if any subsequent action triggered a side-effect rejection', function(
   t
 ) {
-  t.plan(1)
+  t.plan(2)
 
   const initialState = {
     counter: 0,
@@ -720,7 +716,9 @@ test('should return a promise that rejects if any subsequent action triggered a 
         return Object.assign({}, state, { counter: action.value })
       }
       case ADD_UNDO: {
-        return Object.assign({}, state, { undo: action.undo })
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
       }
       default:
         return state
@@ -729,31 +727,29 @@ test('should return a promise that rejects if any subsequent action triggered a 
 
   const firstSubscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(delayedUndoCmd, {
-        name: 'will resolve to an action',
-        args: [to.undo.concat(from.counter)]
-      })
+      return delayedUndoCmd(20, from.counter)
     }
   }
 
   const secondSubscriber = ({ from, to }) => {
     if (from.undo !== to.undo) {
-      return createQueuedRunCmd(
-        () =>
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              reject(new Error('hardcoded rejection'))
-            }, 20)
-          }),
-        { name: 'will reject' }
-      )
+      return delayedRejection(20, 'hardcoded rejection')
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
   subscribe(firstSubscriber)
   subscribe(secondSubscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(
+    dispatchProvider(store.dispatch),
+    delayedUndoProvider,
+    thunkProvider()
+  )
 
   return store
     .dispatch({
@@ -762,6 +758,14 @@ test('should return a promise that rejects if any subsequent action triggered a 
     })
     .catch(e => {
       t.equal(e.message, 'hardcoded rejection', 'promise rejected as expected')
+      t.deepEqual(
+        store.getState(),
+        {
+          counter: 1,
+          undo: [0]
+        },
+        'action side-effect was dispatched and processed'
+      )
     })
     .then(() => t.end())
 })
@@ -811,7 +815,9 @@ test('should allow subscribers to return an array of commands', function(t) {
         return Object.assign({}, state, { counter: action.value })
       }
       case ADD_UNDO: {
-        return Object.assign({}, state, { undo: action.undo })
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
       }
       default:
         return state
@@ -819,28 +825,25 @@ test('should allow subscribers to return an array of commands', function(t) {
   }
 
   let sideEffectsDone = false
-  const firstSubscriber = ({ from, to }) => {
+  const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
       return [
-        dispatchUndoCmd(to.undo.concat(from.counter)),
-        createQueuedRunCmd(() => {
-          return createQueuedRunCmd(
-            () =>
-              new Promise((resolve, reject) => {
-                setTimeout(() => {
-                  sideEffectsDone = true
-                  resolve()
-                }, 20)
-              })
-          )
+        dispatchUndoCmd(from.counter),
+        delayedThunk(20, () => {
+          sideEffectsDone = true
         })
       ]
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
 
   return store
     .dispatch({
@@ -876,7 +879,9 @@ test('should allow subscribers to return syncronous commands that return an arra
         return Object.assign({}, state, { counter: action.value })
       }
       case ADD_UNDO: {
-        return Object.assign({}, state, { undo: action.undo })
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
       }
       default:
         return state
@@ -884,33 +889,27 @@ test('should allow subscribers to return syncronous commands that return an arra
   }
 
   let sideEffectsDone = false
-  const firstSubscriber = ({ from, to }) => {
+  const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createImmediateRunCmd(
-        undo => {
-          return [
-            dispatchUndoCmd(undo),
-            createQueuedRunCmd(() => {
-              return createQueuedRunCmd(
-                () =>
-                  new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                      sideEffectsDone = true
-                      resolve()
-                    }, 20)
-                  })
-              )
-            })
-          ]
-        },
-        { args: [to.undo.concat(from.counter)] }
-      )
+      return immediateThunkCmd(undo => {
+        return [
+          dispatchUndoCmd(from.counter),
+          delayedThunk(20, () => {
+            sideEffectsDone = true
+          })
+        ]
+      })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
 
   return store
     .dispatch({
@@ -946,7 +945,9 @@ test('should allow subscribers to return asynchronous commands that resolve to a
         return Object.assign({}, state, { counter: action.value })
       }
       case ADD_UNDO: {
-        return Object.assign({}, state, { undo: action.undo })
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
       }
       default:
         return state
@@ -954,33 +955,27 @@ test('should allow subscribers to return asynchronous commands that resolve to a
   }
 
   let sideEffectsDone = false
-  const firstSubscriber = ({ from, to }) => {
+  const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
-      return createQueuedRunCmd(
-        undo => {
-          return delayedValue(20, [
-            dispatchUndoCmd(undo),
-            createQueuedRunCmd(() => {
-              return createQueuedRunCmd(
-                () =>
-                  new Promise((resolve, reject) => {
-                    setTimeout(() => {
-                      sideEffectsDone = true
-                      resolve()
-                    }, 20)
-                  })
-              )
-            })
-          ])
-        },
-        { args: [to.undo.concat(from.counter)] }
-      )
+      return queuedThunkCmd(undo => {
+        return delayedValue(20, [
+          dispatchUndoCmd(from.counter),
+          delayedThunk(20, () => {
+            sideEffectsDone = true
+          })
+        ])
+      })
     }
   }
 
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
 
   return store
     .dispatch({

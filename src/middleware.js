@@ -22,7 +22,7 @@ const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
 
 const isCmd = _ =>
-  _ != null && typeof _.isQueued === 'boolean' && typeof _.run === 'function'
+  _ != null && typeof _.isQueued === 'boolean' && typeof _.type === 'string'
 const isImmediateCommand = _ => isCmd(_) && !_.isQueued
 const isQueuedCommand = _ => isCmd(_) && _.isQueued
 
@@ -31,8 +31,19 @@ const isCmdOrPromise = maybeCmdOrPromise =>
 
 const not = fn => x => !fn(x)
 
+const registrar = list => fn => {
+  list.push(fn)
+  return () => {
+    const index = list.indexOf(fn)
+    if (index >= 0) {
+      list.splice(index, 1)
+    }
+  }
+}
+
 const createSerialEffectsMiddleware = extraArgument => {
   const subscribers = []
+  const providers = {}
   let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
@@ -40,7 +51,7 @@ const createSerialEffectsMiddleware = extraArgument => {
       const immediateCommands = commands.filter(isImmediateCommand)
       const queuedCommands = flatten(
         immediateCommands.map(_ =>
-          runImmediateCommands([].concat(_.run(store.dispatch)))
+          runImmediateCommands([].concat(providers[_.type](_)))
         )
       ).filter(isCmdOrPromise)
       return commands.filter(not(isImmediateCommand)).concat(queuedCommands)
@@ -49,7 +60,7 @@ const createSerialEffectsMiddleware = extraArgument => {
     const runQueuedCommands = commands => {
       const asyncCommands = commands.filter(isQueuedCommand)
       const promises = flatten(
-        asyncCommands.map(_ => _.run(store.dispatch))
+        asyncCommands.map(_ => providers[_.type](_))
       ).filter(isCmdOrPromise)
 
       return promises
@@ -110,20 +121,15 @@ const createSerialEffectsMiddleware = extraArgument => {
     return Promise.resolve(result)
   }
 
-  const registrar = list => fn => {
-    list.push(fn)
-    return () => {
-      const index = list.indexOf(fn)
-      if (index >= 0) {
-        list.splice(index, 1)
-      }
-    }
-  }
-
   const subscribe = registrar(subscribers)
+
+  const registerProviders = (...args) => {
+    args.forEach(provider => (providers[provider.type] = provider.runner))
+  }
 
   return {
     middleware,
+    registerProviders,
     subscribe
   }
 }

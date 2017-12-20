@@ -1,6 +1,6 @@
 'use strict'
 
-const create = (name, type, isQueued, options) =>
-  Object.assign({}, options, { name, type, isQueued })
+const create = (type, isQueued, options) =>
+  Object.assign({}, options, { type, isQueued })
 
 module.exports = create
