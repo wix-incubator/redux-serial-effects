@@ -11,9 +11,12 @@ const {
   queuedThunkCmd,
   provider: thunkProvider
 } = require('./commands/thunk')
+const createCmd = require('./commands/base')
 
 module.exports.serialEffectsMiddleware = serialEffectsMiddleware
 module.exports.combineSubscribers = combineSubscribers
+
+module.exports.createCmd = createCmd
 
 module.exports.dispatchCmd = dispatchCmd
 module.exports.dispatchProvider = dispatchProvider

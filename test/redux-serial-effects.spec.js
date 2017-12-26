@@ -7,6 +7,7 @@ const test = _test(tape)
 const { createStore, applyMiddleware, combineReducers } = require('redux')
 const {
   combineSubscribers,
+  createCmd,
   serialEffectsMiddleware,
   dispatchCmd,
   dispatchProvider,
@@ -14,7 +15,6 @@ const {
   queuedThunkCmd,
   thunkProvider
 } = require('../src/index')
-const createCmd = require('../src/commands/base')
 
 const SET_COUNTER = 'SET_COUNTER'
 const ADD_UNDO = 'ADD_UNDO'
