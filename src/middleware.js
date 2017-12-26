@@ -49,18 +49,23 @@ const createSerialEffectsMiddleware = extraArgument => {
   const middleware = store => next => action => {
     const runImmediateCommands = commands => {
       const immediateCommands = commands.filter(isImmediateCommand)
-      const queuedCommands = flatten(
-        immediateCommands.map(_ =>
-          runImmediateCommands([].concat(providers[_.type](_)))
+      const queuedCommands = sequence(
+        immediateCommands.map(cmd =>
+          try_(() => runImmediateCommands([].concat(providers[cmd.type](cmd))))
         )
-      ).filter(isCmdOrPromise)
+      ).fold(
+        e => {
+          throw e
+        },
+        cmd => cmd.filter(isCmdOrPromise)
+      )
       return commands.filter(not(isImmediateCommand)).concat(queuedCommands)
     }
 
     const runQueuedCommands = commands => {
       const asyncCommands = commands.filter(isDeferredCommand)
       const promises = flatten(
-        asyncCommands.map(_ => providers[_.type](_))
+        asyncCommands.map(cmd => providers[cmd.type](cmd))
       ).filter(isCmdOrPromise)
 
       return promises
@@ -96,9 +101,18 @@ const createSerialEffectsMiddleware = extraArgument => {
 
     const queueAndRunCommands = commands => {
       const { promise, trigger } = scheduleExecution()
-      const queuedCommands = runImmediateCommands(commands)
-      trigger(queuedCommands)
-      return promise
+      return try_(() => {
+        return runImmediateCommands(commands)
+      }).fold(
+        e => {
+          trigger()
+          throw e
+        },
+        commands => {
+          trigger(commands)
+          return promise
+        }
+      )
     }
 
     const from = store.getState()
@@ -113,7 +127,9 @@ const createSerialEffectsMiddleware = extraArgument => {
             try_(() => subscriber({ from, to }, extraArgument))
           )
       ).fold(
-        e => Promise.reject(e),
+        e => {
+          throw e
+        },
         commands => queueAndRunCommands(commands.filter(isCmd))
       )
     }

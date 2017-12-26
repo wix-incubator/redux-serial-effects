@@ -352,7 +352,10 @@ test('should handle exceptions in subscriber code', function(t) {
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
 
-  store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
+  try {
+    store.dispatch({ type: SET_COUNTER, value: 1 })
+  } catch (e) {}
+
   return store
     .dispatch({ type: SET_COUNTER, value: 2 })
     .then(() => t.end())
@@ -770,7 +773,7 @@ test('should return a promise that rejects if any subsequent action triggered a 
     .then(() => t.end())
 })
 
-test('should return a promise that rejects if any subscriber throws an exception', function(
+test('should throw an exception if any subscriber throws an exception', function(
   t
 ) {
   t.plan(1)
@@ -796,10 +799,56 @@ test('should return a promise that rejects if any subscriber throws an exception
   subscribe(subscriber)
   const store = createStore(reducer, initialState, applyMiddleware(middleware))
 
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(e => {
+  try {
+    store.dispatch({ type: SET_COUNTER, value: 1 })
+    t.fail('exception not thrown')
+  } catch (e) {
     t.equal(e.message, 'hardcoded exception')
-    t.end()
-  })
+  }
+  t.end()
+})
+
+test('should throw an exception if any immediate side-effect throws an exception', function(
+  t
+) {
+  t.plan(1)
+
+  const initialState = {
+    counter: 0
+  }
+  const reducer = (state, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      default:
+        return state
+    }
+  }
+
+  const errorText = 'hardcoded exception'
+  const subscriber = ({ from, to }) => {
+    return immediateThunkCmd(undo => {
+      throw new Error(errorText)
+    })
+  }
+
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+
+  try {
+    store.dispatch({ type: SET_COUNTER, value: 1 })
+    t.fail('exception not thrown')
+  } catch (e) {
+    t.equal(e.message, 'hardcoded exception')
+  }
+  t.end()
 })
 
 test('should allow subscribers to return an array of commands', function(t) {
@@ -994,4 +1043,125 @@ test('should allow subscribers to return asynchronous commands that resolve to a
       t.true(sideEffectsDone, 'async side-effect was executed and completed')
       t.end()
     })
+})
+
+test('should handle exceptions in providers code', function(t) {
+  t.plan(1)
+
+  const initialState = {
+    counter: 0,
+    undo: []
+  }
+  const reducer = (state = initialState, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      case ADD_UNDO: {
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
+      }
+      default:
+        return state
+    }
+  }
+
+  const errorText = 'hardcoded exception'
+  const subscriber = ({ from, to }) => {
+    if (from.counter !== to.counter) {
+      return dispatchUndoCmd(from.counter)
+    } else if (from.undo !== to.undo) {
+      return immediateThunkCmd(undo => {
+        throw new Error(errorText)
+      })
+    }
+  }
+
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+
+  try {
+    store.dispatch({
+      type: SET_COUNTER,
+      value: 1
+    })
+  } catch (e) {
+    t.equal(e.message, errorText, 'expected exception caught')
+  }
+  t.end()
+})
+
+test('should recover the queue after an exception in provider code', function(
+  t
+) {
+  t.plan(1)
+
+  const FOO = 'FOO'
+  const initialState = {
+    counter: 0,
+    undo: [],
+    foo: undefined
+  }
+  const reducer = (state = initialState, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      case ADD_UNDO: {
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
+      }
+      case FOO: {
+        return Object.assign({}, state, {
+          foo: action.foo
+        })
+      }
+      default:
+        return state
+    }
+  }
+
+  const errorText = 'hardcoded exception'
+  const subscriber = ({ from, to }) => {
+    if (from.counter !== to.counter) {
+      return queuedThunkCmd(undo => {
+        return dispatchCmd({ type: ADD_UNDO, unde: from.counter })
+      })
+    } else if (from.undo !== to.undo) {
+      return immediateThunkCmd(undo => {
+        try {
+          store.dispatch({ type: FOO, foo: 'foo' })
+        } catch (e) {}
+      })
+    } else if (to.foo && from.foo !== to.foo) {
+      return immediateThunkCmd(undo => {
+        throw new Error(errorText)
+      })
+    }
+  }
+
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+
+  return store
+    .dispatch({
+      type: SET_COUNTER,
+      value: 1
+    })
+    .catch(() => t.fail('should not have caught an exception'))
+    .then(() => t.pass())
 })
