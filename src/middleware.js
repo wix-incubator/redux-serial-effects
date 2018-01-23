@@ -93,7 +93,7 @@ const createSerialEffectsMiddleware = extraArgument => {
         queuePromise = queuePromise
           .then(() => gate)
           .then(executeQueuedCommands(resolve, reject), reject)
-          .catch(() => {})
+          .catch(reject)
       })
 
       return { promise, trigger }
@@ -105,7 +105,7 @@ const createSerialEffectsMiddleware = extraArgument => {
         return runImmediateCommands(commands)
       }).fold(
         e => {
-          trigger()
+          trigger([])
           throw e
         },
         commands => {

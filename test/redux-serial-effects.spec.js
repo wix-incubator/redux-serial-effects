@@ -1098,7 +1098,7 @@ test('should handle exceptions in providers code', function(t) {
   t.end()
 })
 
-test('should recover the queue after an exception in provider code', function(
+test('should reject the dispatch promise when a provider returns a rejected promise', function(
   t
 ) {
   t.plan(1)
@@ -1133,17 +1133,7 @@ test('should recover the queue after an exception in provider code', function(
   const subscriber = ({ from, to }) => {
     if (from.counter !== to.counter) {
       return queuedThunkCmd(undo => {
-        return dispatchCmd({ type: ADD_UNDO, unde: from.counter })
-      })
-    } else if (from.undo !== to.undo) {
-      return immediateThunkCmd(undo => {
-        try {
-          store.dispatch({ type: FOO, foo: 'foo' })
-        } catch (e) {}
-      })
-    } else if (to.foo && from.foo !== to.foo) {
-      return immediateThunkCmd(undo => {
-        throw new Error(errorText)
+        return Promise.reject(new Error(errorText))
       })
     }
   }
@@ -1162,6 +1152,145 @@ test('should recover the queue after an exception in provider code', function(
       type: SET_COUNTER,
       value: 1
     })
-    .catch(() => t.fail('should not have caught an exception'))
-    .then(() => t.pass())
+    .catch(() => t.pass('should have caught an exception'))
+})
+
+test('should recover the queue after a provider throws an exception', function(
+  t
+) {
+  t.plan(1)
+
+  const FOO = 'FOO'
+  const initialState = {
+    counter: 0,
+    undo: [],
+    foo: undefined
+  }
+  const reducer = (state = initialState, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      case ADD_UNDO: {
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
+      }
+      case FOO: {
+        return Object.assign({}, state, {
+          foo: action.foo
+        })
+      }
+      default:
+        return state
+    }
+  }
+
+  const errorText = 'hardcoded exception'
+  const subscriber = ({ from, to }) => {
+    if (from.counter !== to.counter) {
+      return queuedThunkCmd(undo => {
+        throw new Error(errorText)
+      })
+    } else if (from.undo !== to.undo) {
+      return queuedThunkCmd(undo => {
+        try {
+          store.dispatch({ type: FOO, foo: 'foo' })
+        } catch (e) {}
+      })
+    }
+  }
+
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+
+  return store
+    .dispatch({
+      type: SET_COUNTER,
+      value: 1
+    })
+    .catch(() => {})
+    .then(() =>
+      store
+        .dispatch({ type: ADD_UNDO, undo: 0 })
+        .then(() =>
+          t.deepEqual(store.getState(), { counter: 1, undo: [0], foo: 'foo' })
+        )
+    )
+})
+
+test('should recover the queue after a provider returns a rejected promise', function(
+  t
+) {
+  t.plan(2)
+
+  const FOO = 'FOO'
+  const initialState = {
+    counter: 0,
+    undo: [],
+    foo: undefined
+  }
+  const reducer = (state = initialState, action) => {
+    switch (action.type) {
+      case SET_COUNTER: {
+        return Object.assign({}, state, { counter: action.value })
+      }
+      case ADD_UNDO: {
+        return Object.assign({}, state, {
+          undo: state.undo.concat(action.undo)
+        })
+      }
+      case FOO: {
+        return Object.assign({}, state, {
+          foo: action.foo
+        })
+      }
+      default:
+        return state
+    }
+  }
+
+  const errorText = 'hardcoded exception'
+  const subscriber = ({ from, to }) => {
+    if (from.counter !== to.counter) {
+      return queuedThunkCmd(undo => {
+        return Promise.reject(new Error(errorText))
+      })
+    } else if (from.undo !== to.undo) {
+      return queuedThunkCmd(undo => {
+        try {
+          store.dispatch({ type: FOO, foo: 'foo' })
+        } catch (e) {}
+      })
+    }
+  }
+
+  const {
+    middleware,
+    subscribe,
+    registerProviders
+  } = serialEffectsMiddleware.withExtraArgument()
+  subscribe(subscriber)
+  const store = createStore(reducer, initialState, applyMiddleware(middleware))
+  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+
+  return store
+    .dispatch({
+      type: SET_COUNTER,
+      value: 1
+    })
+    .catch(() => t.pass('should have caught an exception'))
+    .then(() =>
+      store
+        .dispatch({ type: ADD_UNDO, undo: 0 })
+        .then(() =>
+          t.deepEqual(store.getState(), { counter: 1, undo: [0], foo: 'foo' })
+        )
+    )
 })
