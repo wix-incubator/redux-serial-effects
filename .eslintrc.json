@@ -5,11 +5,12 @@
   },
   "plugins": [
     "lodash",
-    "mocha",
+    "jest",
     "prettier"
   ],
   "extends": [
     "standard",
+    "plugin:jest/recommended",
     "prettier"
   ],
   "rules": {
@@ -20,7 +21,6 @@
     "key-spacing": 0,
     "keyword-spacing": 0,
     "lodash/import-scope": 2,
-    "mocha/no-exclusive-tests": 2,
     "new-parens": 0,
     "no-console": 2,
     "no-extra-parens": 0,

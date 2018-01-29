@@ -1,23 +1,17 @@
+/* eslint-env jest */
 'use strict'
 
-const tape = require('tape-catch')
-const _test = require('tape-promise').default
-const test = _test(tape)
-
 const { createStore, applyMiddleware, combineReducers } = require('redux')
-const {
-  combineSubscribers,
-  createCmd,
-  serialEffectsMiddleware,
-  dispatchCmd,
-  dispatchProvider,
-  immediateThunkCmd,
-  queuedThunkCmd,
-  thunkProvider
-} = require('../src/index')
+
+const { combineSubscribers, createMiddleware, matchAction } = require('../src')
+
+const testCommands = require('./utils/commands')
+const testExecutor = require('./utils/executor')
 
 const SET_COUNTER = 'SET_COUNTER'
+const VALUE_ACTION = 'VALUE_ACTION'
 const ADD_UNDO = 'ADD_UNDO'
+const COMMAND_ENDED_MSG = 'COMMAND_ENDED_MSG'
 
 process.on('unhandledRejection', reason => {
   console.warn('Unhandled rejection:', reason) // eslint-disable-line no-console
@@ -27,1270 +21,2428 @@ process.on('uncaughtException', reason => {
   console.warn('Uncaught exception:', reason) // eslint-disable-line no-console
 })
 
-const dispatchUndoCmd = undo => dispatchCmd({ type: ADD_UNDO, undo })
+describe('combineSubscribers', function() {
+  test('should compose subscribers', function() {
+    expect.assertions(1)
 
-const DELAYED_UNDO_TYPE = 'DELAYED_UNDO'
-const delayedUndoProvider = {
-  type: DELAYED_UNDO_TYPE,
-  runner: cmd => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        resolve(dispatchUndoCmd(cmd.undo))
-      }, cmd.delay)
-    })
-  }
-}
-
-const delayedUndoCmd = (delay, undo) =>
-  createCmd(DELAYED_UNDO_TYPE, true, {
-    delay,
-    undo
-  })
-
-const delayedThunk = (delay, fn) =>
-  queuedThunkCmd(extraArgument => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        try {
-          resolve(fn(extraArgument))
-        } catch (e) {
-          reject(e)
+    const initialState = {
+      counterOne: { value: 0 },
+      counterTwo: { value: 1 },
+      counterThree: { value: 2 }
+    }
+    const reducer = index => (state = { value: index }, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return action.value !== state.value
+            ? Object.assign({}, state, { value: action.value })
+            : state
         }
-      }, delay)
-    })
-  })
-
-const delayedRejection = (delay, reason) =>
-  queuedThunkCmd(extraArgument => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        reject(new Error(reason))
-      }, delay)
-    })
-  })
-
-const delayedValue = (delay, value) => delayedThunk(delay, () => value)
-
-test('should change the state synchronously', function(t) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
+        default:
+          return state
       }
-      default:
-        return state
     }
-  }
 
-  const { middleware } = serialEffectsMiddleware.withExtraArgument()
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  store.dispatch({ type: SET_COUNTER, value: 1 })
-  store.dispatch({ type: SET_COUNTER, value: 2 })
-
-  t.deepEqual(
-    store.getState(),
-    { counter: 2 },
-    'state was updated synchronously'
-  )
-})
-
-test('should receive the previous state and the new state', function(t) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
+    const triggeredSubscribers = []
+    const subscriber = index => ({ from, to, isChanged }) => {
+      triggeredSubscribers.push(index)
     }
-  }
 
-  const subscriber = states => {
-    t.deepEqual(
-      states,
-      { from: initialState, to: { counter: 1 } },
-      'both state objects passed correctly'
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(
+      combineSubscribers({
+        counterOne: subscriber(0),
+        counterTwo: subscriber(1),
+        counterThree: subscriber(2)
+      })
     )
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 })
-})
-
-test('should receive the extra argument given when creating the middleware', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const extra = Symbol('extra')
-
-  const subscriber = ({ from, to }, extraArgument) => {
-    t.equal(extra, extraArgument, 'correct extraArgument passed')
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument(
-    extra
-  )
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 })
-})
-
-test('should compose subscribers', function(t) {
-  t.plan(1)
-
-  const initialState = {
-    counterOne: { value: 0 },
-    counterTwo: { value: 1 },
-    counterThree: { value: 2 }
-  }
-  const reducer = index => (state = { value: index }, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return action.value !== state.value
-          ? Object.assign({}, state, { value: action.value })
-          : state
-      }
-      default:
-        return state
-    }
-  }
-
-  const triggeredSubscribers = []
-  const subscriber = index => ({ from, to }) => {
-    triggeredSubscribers.push(index)
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(
-    combineSubscribers({
-      counterOne: subscriber(0),
-      counterTwo: subscriber(1),
-      counterThree: subscriber(2)
-    })
-  )
-  const store = createStore(
-    combineReducers({
-      counterOne: reducer(0),
-      counterTwo: reducer(1),
-      counterThree: reducer(2)
-    }),
-    initialState,
-    applyMiddleware(middleware)
-  )
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.equal(
-      triggeredSubscribers.length,
-      2,
-      'the correct subscribers were called'
+    const store = createStore(
+      combineReducers({
+        counterOne: reducer(0),
+        counterTwo: reducer(1),
+        counterThree: reducer(2)
+      }),
+      initialState,
+      applyMiddleware(middleware)
     )
-    t.end()
+
+    return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+      expect(triggeredSubscribers).toHaveLength(2)
+    })
   })
-})
 
-test('should not call unsubscribed subscribers', function(t) {
-  t.plan(1)
+  test('should provide a pre-applied isChanged function', function() {
+    expect.assertions(2)
 
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
+    const getValue = state => state.value
+    const initialState = {
+      counterOne: { value: 0 },
+      counterTwo: { value: 1 },
+      counterThree: { value: 2 }
+    }
+    const reducer = index => (state = { value: index }, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return action.value !== state.value
+            ? Object.assign({}, state, { value: action.value })
+            : state
+        }
+        default:
+          return state
       }
-      default:
-        return state
     }
-  }
 
-  let subscriberCalled = false
-  const subscriber = ({ from, to }) => {
-    subscriberCalled = true
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)()
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.false(subscriberCalled, 'subscriber was not called')
-  })
-})
-
-test('should not break when unsubscribing an already unsubscribed subscriber', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
+    const subscriber = index => ({ from, to, isChanged }) => {
+      expect(isChanged(getValue)).toBe(true)
     }
-  }
 
-  const unsubscriber = () => t.fail('unsubscribed subscriber called')
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(
+      combineSubscribers({
+        counterOne: subscriber(0),
+        counterTwo: subscriber(1),
+        counterThree: subscriber(2)
+      })
+    )
+    const store = createStore(
+      combineReducers({
+        counterOne: reducer(0),
+        counterTwo: reducer(1),
+        counterThree: reducer(2)
+      }),
+      initialState,
+      applyMiddleware(middleware)
+    )
 
-  let subscriberCalled = false
-  const subscriber = ({ from, to }) => {
-    subscriberCalled = true
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const unsubscribeUnsubscriber = subscribe(unsubscriber)
-
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  unsubscribeUnsubscriber()
-  unsubscribeUnsubscriber()
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.true(subscriberCalled, 'registered subscriber called')
-  })
-})
-
-test('should not call subscribers when the dispatched action does not change the state', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  let subscriberCalled = false
-  const subscriber = ({ from, to }) => {
-    subscriberCalled = true
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  return store.dispatch({ type: ADD_UNDO, undo: [] }).then(() => {
-    t.false(subscriberCalled, 'subscriber was not called')
-  })
-})
-
-test('should handle exceptions in subscriber code', function(t) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  let shouldThrow = true
-  const subscriber = ({ from, to }) => {
-    if (shouldThrow) {
-      shouldThrow = false
-      throw new Error('hardcoded exception')
-    } else {
-      t.equal(
-        to.counter,
-        2,
-        'second action was handled correctly after the first call threw an exception'
-      )
-    }
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  try {
     store.dispatch({ type: SET_COUNTER, value: 1 })
-  } catch (e) {}
-
-  return store
-    .dispatch({ type: SET_COUNTER, value: 2 })
-    .then(() => t.end())
-    .catch(t.fail)
-})
-
-test('should run async side-effects only after previous side-effect promises have resolved/rejected', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  let resolveFirstSideEffect = undefined
-  let firstSideEffectsDone = false
-  const firstSideEffectPromise = new Promise((resolve, reject) => {
-    resolveFirstSideEffect = () => {
-      firstSideEffectsDone = true
-      resolve()
-    }
-  })
-
-  const subscriber = ({ from, to }) => {
-    if (to.counter === 1) {
-      return immediateThunkCmd(() => firstSideEffectPromise)
-    } else {
-      return queuedThunkCmd(() => {
-        t.true(
-          firstSideEffectsDone,
-          'second change subscribers called waited on first change side-effects'
-        )
-        t.end()
-      })
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(thunkProvider())
-
-  store.dispatch({ type: SET_COUNTER, value: 1 })
-  const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
-
-  resolveFirstSideEffect()
-  return promise
-})
-
-test('should synchronously dispatch an action returned from a subscriber', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0,
-    mirroredCounter: 0
-  }
-  const MIRRORED_ACTION = 'mirrored_action'
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case MIRRORED_ACTION: {
-        return Object.assign({}, state, { mirroredCounter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return dispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch))
-
-  const dispatchPromise = store.dispatch({ type: SET_COUNTER, value: 1 })
-
-  t.equal(
-    store.getState().mirroredCounter,
-    store.getState().counter,
-    'synchronous action dispatched'
-  )
-
-  return dispatchPromise
-})
-
-test('should dispatch an action returned from side-effects chain', function(t) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0,
-    mirroredCounter: 0
-  }
-  const MIRRORED_ACTION = 'mirrored_action'
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case MIRRORED_ACTION: {
-        return Object.assign({}, state, { mirroredCounter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return queuedThunkCmd(() =>
-        Promise.resolve(
-          dispatchCmd({ type: MIRRORED_ACTION, value: to.counter })
-        )
-      )
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
-
-  return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
-    t.equal(
-      store.getState().mirroredCounter,
-      store.getState().counter,
-      'action dispatched'
-    )
-    t.end()
   })
 })
 
-test('should return a promise that resolves when side-effects of all subscribers are done', function(
-  t
-) {
-  t.plan(2)
+describe('middleware', function() {
+  test('should change the state synchronously', function() {
+    expect.assertions(1)
 
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const firstSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedThunk(10, () => {
-        firstBatchDone = true
-      })
-    }
-  }
-
-  const secondSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedThunk(20, () => {
-        secondBatchDone = true
-      })
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
-  subscribe(secondSubscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(thunkProvider())
-
-  let firstBatchDone = false
-  let secondBatchDone = false
-
-  const subscriberPromise = store.dispatch({
-    type: SET_COUNTER,
-    value: 1
-  })
-
-  return subscriberPromise.then(() => {
-    t.true(firstBatchDone, 'first subscriber done')
-    t.true(secondBatchDone, 'second subscriber done')
-    t.end()
-  })
-})
-
-test('should return a promise that resolves only after all related/subsequent commands are resolved', function(
-  t
-) {
-  t.plan(2)
-
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
-    }
-  }
-
-  const firstSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedUndoCmd(20, from.counter)
-    }
-  }
-
-  const secondSubscriber = ({ from, to }) => {
-    if (from.undo !== to.undo) {
-      return delayedThunk(20, () => {
-        sideEffectsDone = true
-      })
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
-  subscribe(secondSubscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(
-    dispatchProvider(store.dispatch),
-    delayedUndoProvider,
-    thunkProvider()
-  )
-
-  let sideEffectsDone = false
-
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .then(() => {
-      t.true(sideEffectsDone, 'promise resolved after side-effects completion')
-      t.deepEqual(
-        store.getState(),
-        { counter: 1, undo: [0] },
-        'action dispatched'
-      )
-      t.end()
-    })
-})
-
-test('should return a promise that rejects if at least one async action rejected its promise', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    root: {
+    const initialState = {
       counter: 0
     }
-  }
-  const reducer = (state = initialState['root'], action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
       }
-      default:
-        return state
     }
-  }
 
-  const firstSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedThunk(20, () => {})
-    }
-  }
+    const { middleware } = createMiddleware()
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
 
-  const secondSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedRejection(20, 'hardcoded rejection')
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(combineSubscribers({ root: firstSubscriber }))
-  subscribe(combineSubscribers({ root: secondSubscriber }))
-  const store = createStore(
-    combineReducers({ root: reducer }),
-    initialState,
-    applyMiddleware(middleware)
-  )
-  registerProviders(thunkProvider())
-
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .catch(e => {
-      t.equal(e.message, 'hardcoded rejection', 'promise rejected as expected')
-    })
-    .then(() => t.end())
-})
-
-test('should return a promise that rejects if any subsequent action triggered a side-effect rejection', function(
-  t
-) {
-  t.plan(2)
-
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
-    }
-  }
-
-  const firstSubscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return delayedUndoCmd(20, from.counter)
-    }
-  }
-
-  const secondSubscriber = ({ from, to }) => {
-    if (from.undo !== to.undo) {
-      return delayedRejection(20, 'hardcoded rejection')
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(firstSubscriber)
-  subscribe(secondSubscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(
-    dispatchProvider(store.dispatch),
-    delayedUndoProvider,
-    thunkProvider()
-  )
-
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .catch(e => {
-      t.equal(e.message, 'hardcoded rejection', 'promise rejected as expected')
-      t.deepEqual(
-        store.getState(),
-        {
-          counter: 1,
-          undo: [0]
-        },
-        'action side-effect was dispatched and processed'
-      )
-    })
-    .then(() => t.end())
-})
-
-test('should throw an exception if any subscriber throws an exception', function(
-  t
-) {
-  t.plan(1)
-
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
-    }
-  }
-
-  const subscriber = ({ from, to }) => {
-    throw new Error('hardcoded exception')
-  }
-
-  const { middleware, subscribe } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-
-  try {
     store.dispatch({ type: SET_COUNTER, value: 1 })
-    t.fail('exception not thrown')
-  } catch (e) {
-    t.equal(e.message, 'hardcoded exception')
-  }
-  t.end()
-})
+    store.dispatch({ type: SET_COUNTER, value: 2 })
 
-test('should throw an exception if any immediate side-effect throws an exception', function(
-  t
-) {
-  t.plan(1)
+    expect(store.getState()).toEqual({ counter: 2 })
+  })
 
-  const initialState = {
-    counter: 0
-  }
-  const reducer = (state, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      default:
-        return state
+  test('should not call unsubscribed subscribers', function() {
+    expect.assertions(1)
+
+    const initialState = {
+      counter: 0
     }
-  }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
 
-  const errorText = 'hardcoded exception'
-  const subscriber = ({ from, to }) => {
-    return immediateThunkCmd(undo => {
-      throw new Error(errorText)
+    let subscriberCalled = false
+    const subscriber = ({ from, to, isChanged }) => {
+      subscriberCalled = true
+    }
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)()
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+      expect(subscriberCalled).toBe(false)
     })
-  }
+  })
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+  test('should not break when unsubscribing an already unsubscribed subscriber', function() {
+    expect.assertions(1)
 
-  try {
+    const initialState = {
+      counter: 0
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
+
+    const unsubscriber = () => {
+      throw new Error('unsubscribed subscriber called')
+    }
+
+    let subscriberCalled = false
+    const subscriber = ({ from, to, isChanged }) => {
+      subscriberCalled = true
+    }
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)
+    const unsubscribeUnsubscriber = subscribe(unsubscriber)
+
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    unsubscribeUnsubscriber()
+    unsubscribeUnsubscriber()
+
+    return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+      expect(subscriberCalled).toBe(true)
+    })
+  })
+
+  test('should not call subscribers when the dispatched action does not change the state', function() {
+    expect.assertions(1)
+
+    const initialState = {
+      counter: 0
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
+
+    let subscriberCalled = false
+    const subscriber = ({ from, to, isChanged }) => {
+      subscriberCalled = true
+    }
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    return store.dispatch({ type: ADD_UNDO, undo: [] }).then(() => {
+      expect(subscriberCalled).toBe(false)
+    })
+  })
+
+  test('should handle subscriber that do not generate commands', function() {
+    expect.assertions(1)
+
+    const initialState = {
+      counter: 0
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
+
+    const subscriber = ({ from, to, isChanged }) => {}
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    return expect(
+      store.dispatch({ type: SET_COUNTER, value: 1 })
+    ).resolves.toBeUndefined()
+  })
+
+  test('should handle subscribers that return empty command lists', function() {
+    expect.assertions(1)
+
+    const initialState = {
+      counter: 0
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
+
+    const subscriber = ({ from, to, isChanged }) => []
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    return expect(
+      store.dispatch({ type: SET_COUNTER, value: 1 })
+    ).resolves.toBeUndefined()
+  })
+
+  test('should handle exceptions in subscriber code', function() {
+    expect.assertions(2)
+
+    const initialState = {
+      counter: 0
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
+    }
+
+    let shouldThrow = true
+    const subscriber = ({ from, to, isChanged }) => {
+      if (shouldThrow) {
+        shouldThrow = false
+        throw new Error('hardcoded exception')
+      } else {
+        expect(to.counter).toEqual(2)
+      }
+    }
+
+    const { middleware, subscribe } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    try {
+      store.dispatch({ type: SET_COUNTER, value: 1 })
+    } catch (e) {}
+
+    return expect(
+      store.dispatch({ type: SET_COUNTER, value: 2 })
+    ).resolves.toBeUndefined()
+  })
+
+  test('should execute immediate commands', function() {
+    expect.assertions(1)
+
+    const initialState = {
+      counter: 0,
+      resolved: false
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        case VALUE_ACTION: {
+          return matchAction(action, {
+            Error: error => {
+              throw new Error('unexpected error:', error)
+            },
+            Ok: value => {
+              return Object.assign({}, state, { resolved: value })
+            }
+          })
+        }
+        default:
+          return state
+      }
+    }
+
+    const subscriber = ({ from, to, isChanged }) => {
+      if (from.counter !== to.counter) {
+        return testCommands.immediateValueCmd(true, VALUE_ACTION)
+      }
+    }
+
+    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+    registerExecutors(testExecutor.createExecutor())
+
     store.dispatch({ type: SET_COUNTER, value: 1 })
-    t.fail('exception not thrown')
-  } catch (e) {
-    t.equal(e.message, 'hardcoded exception')
-  }
-  t.end()
-})
+    expect(store.getState().resolved).toBe(true)
+  })
 
-test('should allow subscribers to return an array of commands', function(t) {
-  t.plan(2)
+  test('should execute queued commands', function() {
+    expect.assertions(1)
 
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
+    const initialState = {
+      counter: 0,
+      resolved: false
     }
-  }
-
-  let sideEffectsDone = false
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return [
-        dispatchUndoCmd(from.counter),
-        delayedThunk(20, () => {
-          sideEffectsDone = true
-        })
-      ]
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        case VALUE_ACTION: {
+          return matchAction(action, {
+            Error: () => {
+              throw new Error('unexpected error')
+            },
+            Ok: value => {
+              return Object.assign({}, state, { resolved: value })
+            }
+          })
+        }
+        default:
+          return state
+      }
     }
-  }
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+    const subscriber = ({ from, to, isChanged }) => {
+      if (from.counter !== to.counter) {
+        return testCommands.queuedDelayedValueCmd(10, true, VALUE_ACTION)
+      }
+    }
 
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
+    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+    registerExecutors(testExecutor.createExecutor())
+
+    return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
+      expect(store.getState().resolved).toBe(true)
     })
-    .then(() => {
-      t.deepEqual(
-        store.getState(),
-        {
-          counter: 1,
-          undo: [0]
-        },
-        'action side-effect was dispatched and processed'
-      )
-      t.true(sideEffectsDone, 'async side-effect was executed and completed')
-      t.end()
-    })
-})
+  })
 
-test('should allow subscribers to return syncronous commands that return an array of commands', function(
-  t
-) {
-  t.plan(2)
+  test('should execute immediate commands synchronously', function() {
+    expect.assertions(1)
 
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
+    const initialState = {
+      counter: 0,
+      resolved: false
     }
-  }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        case VALUE_ACTION: {
+          return matchAction(action, {
+            Error: error => {
+              throw new Error('unexpected error:', error)
+            },
+            Ok: value => {
+              return Object.assign({}, state, { resolved: value })
+            }
+          })
+        }
+        default:
+          return state
+      }
+    }
 
-  let sideEffectsDone = false
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return immediateThunkCmd(undo => {
+    const subscriber = ({ from, to, isChanged }) => {
+      if (from.counter !== to.counter) {
         return [
-          dispatchUndoCmd(from.counter),
-          delayedThunk(20, () => {
-            sideEffectsDone = true
-          })
+          testCommands.queuedDelayedValueCmd('BOGUS_ACTION', 1000),
+          testCommands.immediateValueCmd(true, VALUE_ACTION)
         ]
-      })
-    }
-  }
-
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
-
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .then(() => {
-      t.deepEqual(
-        store.getState(),
-        {
-          counter: 1,
-          undo: [0]
-        },
-        'action side-effect was dispatched and processed'
-      )
-      t.true(sideEffectsDone, 'async side-effect was executed and completed')
-      t.end()
-    })
-})
-
-test('should allow subscribers to return asynchronous commands that resolve to an array of commands', function(
-  t
-) {
-  t.plan(2)
-
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
       }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
     }
-  }
 
-  let sideEffectsDone = false
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return queuedThunkCmd(undo => {
-        return delayedValue(20, [
-          dispatchUndoCmd(from.counter),
-          delayedThunk(20, () => {
-            sideEffectsDone = true
+    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+    registerExecutors(testExecutor.createExecutor())
+
+    store.dispatch({ type: SET_COUNTER, value: 1 })
+    expect(store.getState().resolved).toEqual(true)
+  })
+
+  test('should allow subscribers to return an array of commands', function() {
+    expect.assertions(1)
+
+    const FLOW_COMPLETE_MSG = 'FLOW_COMPLETE_MSG'
+    const initialState = {
+      counter: 0,
+      undo: [],
+      done: false
+    }
+    const reducer = (state = initialState, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        case ADD_UNDO: {
+          return matchAction(action, {
+            Error: error => {
+              throw new Error(`unexpected error: ${error}`)
+            },
+            Ok: undo => {
+              return Object.assign({}, state, {
+                undo: state.undo.concat(undo)
+              })
+            }
           })
-        ])
-      })
+        }
+        case FLOW_COMPLETE_MSG: {
+          return matchAction(action, {
+            Error: error => {
+              throw new Error(`unexpected error: ${error}`)
+            },
+            Ok: done => {
+              return Object.assign({}, state, {
+                done
+              })
+            }
+          })
+        }
+        default:
+          return state
+      }
     }
-  }
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+    const subscriber = ({ from, to, isChanged }) => {
+      if (isChanged(state => state.counter)) {
+        return [
+          testCommands.immediateValueCmd(from.counter, ADD_UNDO),
+          testCommands.queuedDelayedValueCmd(20, true, FLOW_COMPLETE_MSG)
+        ]
+      }
+    }
 
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .then(() => {
-      t.deepEqual(
-        store.getState(),
-        {
+    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+    registerExecutors(testExecutor.createExecutor())
+
+    return store
+      .dispatch({
+        type: SET_COUNTER,
+        value: 1
+      })
+      .then(() => {
+        expect(store.getState()).toEqual({
           counter: 1,
-          undo: [0]
-        },
-        'action side-effect was dispatched and processed'
+          undo: [0],
+          done: true
+        })
+      })
+  })
+
+  describe('should pass subscribers', function() {
+    test('the extra argument given when creating the middleware', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      const extra = Symbol('extra')
+
+      const subscriber = ({ from, to, isChanged }, extraArgument) => {
+        expect(extra).toEqual(extraArgument)
+      }
+
+      const { middleware, subscribe } = createMiddleware(extra)
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
       )
-      t.true(sideEffectsDone, 'async side-effect was executed and completed')
-      t.end()
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 })
     })
-})
 
-test('should handle exceptions in providers code', function(t) {
-  t.plan(1)
+    describe('a transition object', function() {
+      test('with the previous state and the new state', function() {
+        expect.assertions(1)
 
-  const initialState = {
-    counter: 0,
-    undo: []
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      default:
-        return state
-    }
-  }
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            default:
+              return state
+          }
+        }
 
-  const errorText = 'hardcoded exception'
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return dispatchUndoCmd(from.counter)
-    } else if (from.undo !== to.undo) {
-      return immediateThunkCmd(undo => {
-        throw new Error(errorText)
+        const subscriber = states => {
+          expect(states).toMatchObject({
+            from: initialState,
+            to: { counter: 1 }
+          })
+        }
+
+        const { middleware, subscribe } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+
+        return store.dispatch({ type: SET_COUNTER, value: 1 })
       })
-    }
-  }
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+      describe('with an isChanged function', function() {
+        test('pre-bound to the current transition', function() {
+          expect.assertions(2)
 
-  try {
-    store.dispatch({
-      type: SET_COUNTER,
-      value: 1
+          const getCount = state => state.counter
+          const getName = state => state.name
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, isChanged }) => {
+            expect(isChanged(getCount)).toBe(true)
+            expect(isChanged(getName)).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(subscriber)
+          const store = createStore(
+            reducer,
+            initialState,
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that performs deep equality on objects', function() {
+          expect.assertions(1)
+
+          const getProperties = state => state.properties
+
+          const initialState = {
+            counter: 0,
+            properties: {
+              name: 'number of tests'
+            }
+          }
+          const reducer = (state, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, isChanged }) => {
+            expect(isChanged(getProperties)).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(subscriber)
+          const store = createStore(
+            reducer,
+            initialState,
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+      })
     })
-  } catch (e) {
-    t.equal(e.message, errorText, 'expected exception caught')
-  }
-  t.end()
-})
+  })
 
-test('should reject the dispatch promise when a provider returns a rejected promise', function(
-  t
-) {
-  t.plan(1)
+  describe('when an action is not specified', function() {
+    test('and an immediate command completes successfully should not reject', function() {
+      expect.assertions(1)
 
-  const FOO = 'FOO'
-  const initialState = {
-    counter: 0,
-    undo: [],
-    foo: undefined
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
+      const initialState = {
+        counter: 0
       }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            if (state.counter > 0) {
+              throw new Error('should not have received another action')
+            }
+            return state
+        }
       }
-      case FOO: {
-        return Object.assign({}, state, {
-          foo: action.foo
-        })
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateValueCmd('some value')
+        }
       }
-      default:
-        return state
-    }
-  }
 
-  const errorText = 'hardcoded exception'
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return queuedThunkCmd(undo => {
-        return Promise.reject(new Error(errorText))
-      })
-    }
-  }
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
-
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
+      return expect(
+        store.dispatch({ type: SET_COUNTER, value: 1 })
+      ).resolves.toBeUndefined()
     })
-    .catch(() => t.pass('should have caught an exception'))
-})
 
-test('should recover the queue after a provider throws an exception', function(
-  t
-) {
-  t.plan(1)
+    test('and an immediate command throws an exception should rethrow the exception', function() {
+      expect.assertions(1)
 
-  const FOO = 'FOO'
-  const initialState = {
-    counter: 0,
-    undo: [],
-    foo: undefined
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
+      const initialState = {
+        counter: 0
       }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            if (state.counter > 0) {
+              throw new Error('should not have received another action')
+            }
+            return state
+        }
       }
-      case FOO: {
-        return Object.assign({}, state, {
-          foo: action.foo
-        })
-      }
-      default:
-        return state
-    }
-  }
 
-  const errorText = 'hardcoded exception'
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return queuedThunkCmd(undo => {
-        throw new Error(errorText)
+      const errorText = 'hardcoded exception'
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateThrowCmd(errorText)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      expect(() => store.dispatch({ type: SET_COUNTER, value: 1 })).toThrow(
+        new Error(errorText)
+      )
+    })
+
+    test('and a queued command resolves should not reject', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            if (state.counter > 0) {
+              throw new Error('should not have received another action')
+            }
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedDelayedValueCmd(10, 'something')
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return expect(
+        store.dispatch({ type: SET_COUNTER, value: 1 })
+      ).resolves.toBeUndefined()
+    })
+
+    test('and a queued command rejects should reject with the correct error', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            if (state.counter > 0) {
+              throw new Error('should not have received another action')
+            }
+            return state
+        }
+      }
+
+      const errorText = 'hardcoded rejection'
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedDelayedRejectCmd(10, errorText)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store
+        .dispatch({ type: SET_COUNTER, value: 1 })
+        .catch(error => expect(error.message).toEqual(errorText))
+    })
+  })
+
+  describe('should dispatch an action', function() {
+    test('when an immediate command completes successfully', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case COMMAND_ENDED_MSG: {
+            expect(action).toEqual(expect.anything())
+            return state
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateValueCmd('some value', COMMAND_ENDED_MSG)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 })
+    })
+
+    test('when an immediate command throws an exception', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case COMMAND_ENDED_MSG: {
+            expect(action).toEqual(expect.anything())
+            return state
+          }
+          default:
+            return state
+        }
+      }
+
+      const errorText = 'hardcoded exception'
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      try {
+        store.dispatch({ type: SET_COUNTER, value: 1 })
+      } catch (e) {}
+    })
+
+    test('when a queued command resolves', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case COMMAND_ENDED_MSG: {
+            expect(action).toEqual(expect.anything())
+            return state
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedDelayedValueCmd(
+            10,
+            'something',
+            COMMAND_ENDED_MSG
+          )
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 })
+    })
+
+    test('when a queued command rejects', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case COMMAND_ENDED_MSG: {
+            expect(action).toEqual(expect.anything())
+            return state
+          }
+          default:
+            return state
+        }
+      }
+
+      const errorText = 'hardcoded rejection'
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedDelayedRejectCmd(
+            10,
+            errorText,
+            COMMAND_ENDED_MSG
+          )
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
+    })
+
+    describe('and handle any rejections', function() {
+      test('when a subsequent immediate command throws an exception', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0,
+          undo: [],
+          error: false
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: () => {
+                  return Object.assign({}, state, { error: true })
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const errorText = 'hardcoded exception'
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.immediateRejectCmd(errorText, ADD_UNDO)
+          } else if (isChanged(state => state.error)) {
+            return testCommands.queuedRejectCmd(errorText, COMMAND_ENDED_MSG)
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({ type: SET_COUNTER, value: 1 })
+          .then(value => expect(value).toBeUndefined())
       })
-    } else if (from.undo !== to.undo) {
-      return queuedThunkCmd(undo => {
+
+      test('when a subsequent queued command rejects', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case COMMAND_ENDED_MSG: {
+              expect(action).toEqual(expect.anything())
+              return state
+            }
+            default:
+              return state
+          }
+        }
+
+        const errorText = 'hardcoded rejection'
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedRejectCmd(
+              10,
+              errorText,
+              COMMAND_ENDED_MSG
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
+      })
+    })
+
+    describe('with the correct payload', function() {
+      test('when an immediate command completes successfully', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0,
+          undo: []
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({ type: SET_COUNTER, value: 1 })
+          .then(() =>
+            expect(store.getState()).toEqual({ counter: 1, undo: [0] })
+          )
+      })
+
+      test('when an immediate command throws an exception', function() {
+        expect.assertions(1)
+
+        const errorMsg = 'hardcoded exception'
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case COMMAND_ENDED_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  expect(error.message).toEqual(errorMsg)
+                  return state
+                },
+                Ok: () => {
+                  throw new Error('command should have failed')
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.immediateThrowCmd(errorMsg, COMMAND_ENDED_MSG)
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
         try {
-          store.dispatch({ type: FOO, foo: 'foo' })
+          store.dispatch({ type: SET_COUNTER, value: 1 })
         } catch (e) {}
       })
-    }
-  }
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+      test('when a queued command resolves', function() {
+        expect.assertions(1)
 
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .catch(() => {})
-    .then(() =>
-      store
-        .dispatch({ type: ADD_UNDO, undo: 0 })
-        .then(() =>
-          t.deepEqual(store.getState(), { counter: 1, undo: [0], foo: 'foo' })
+        const successValue = 42
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case COMMAND_ENDED_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: value => {
+                  expect(value).toEqual(successValue)
+                  return state
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedValueCmd(
+              10,
+              successValue,
+              COMMAND_ENDED_MSG
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
         )
-    )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store.dispatch({ type: SET_COUNTER, value: 1 })
+      })
+
+      test('when a queued command rejects', function() {
+        expect.assertions(1)
+
+        const errorMsg = 'hardcoded exception'
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case COMMAND_ENDED_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  expect(error.message).toEqual(errorMsg)
+                  return state
+                },
+                Ok: () => {
+                  throw new Error('command should have failed')
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedRejectCmd(
+              10,
+              errorMsg,
+              COMMAND_ENDED_MSG
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
+      })
+    })
+  })
+
+  describe('command execution', function() {
+    test('should not wait for promises returned from immediate commands', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0,
+        resolved: false
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case VALUE_ACTION: {
+            return matchAction(action, {
+              Error: error => {
+                throw new Error('unexpected error:', error)
+              },
+              Ok: value => {
+                return Object.assign({}, state, { resolved: value })
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      let resolveFirstSideEffect = undefined
+      const firstSideEffectPromise = new Promise((resolve, reject) => {
+        resolveFirstSideEffect = () => {
+          resolve()
+        }
+      })
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (to.counter === 1) {
+          return testCommands.immediateValueCmd(
+            'BOGUS_ACTION',
+            firstSideEffectPromise
+          )
+        } else if (from.counter === 1 && to.counter === 2) {
+          return testCommands.queuedDelayedValueCmd(10, true, VALUE_ACTION)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      store.dispatch({ type: SET_COUNTER, value: 1 })
+      return store
+        .dispatch({ type: SET_COUNTER, value: 2 })
+        .then(() => {
+          expect(store.getState().resolved).toBe(true)
+        })
+        .then(() => {
+          resolveFirstSideEffect()
+        })
+    })
+
+    describe('should run queued commands only after previous side-effect promises have', function() {
+      test('resolved', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0,
+          undo: [],
+          resolved: false
+        }
+
+        const getCounter = state => state.counter
+        const getResolved = state => state.resolved
+
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            case VALUE_ACTION: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error('unexpected error:', error)
+                },
+                Ok: value => {
+                  return Object.assign({}, state, { resolved: value })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(getCounter)) {
+            if (to.counter === 1) {
+              return testCommands.queuedDelayedValueCmd(
+                20,
+                from.counter,
+                ADD_UNDO
+              )
+            } else if (to.counter === 2) {
+              return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
+            }
+          } else if (isChanged(getResolved)) {
+            expect(to.undo).toEqual([0])
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        store.dispatch({ type: SET_COUNTER, value: 1 })
+        const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
+
+        return promise
+      })
+
+      test('rejected', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0,
+          error: false,
+          resolved: false
+        }
+
+        const getCounter = state => state.counter
+        const getResolved = state => state.resolved
+
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: () => {
+                  return Object.assign({}, state, { error: true })
+                },
+                Ok: undo => {
+                  throw new Error('the commans was expected to fail')
+                }
+              })
+            }
+            case VALUE_ACTION: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error('unexpected error:', error)
+                },
+                Ok: value => {
+                  return Object.assign({}, state, { resolved: value })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(getCounter)) {
+            if (to.counter === 1) {
+              return testCommands.queuedDelayedRejectCmd(
+                20,
+                from.counter,
+                ADD_UNDO
+              )
+            } else if (to.counter === 2) {
+              return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
+            }
+          } else if (isChanged(getResolved)) {
+            expect(to.error).toBe(true)
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
+        const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
+
+        return promise
+      })
+    })
+  })
+
+  describe('should recover the queue after', function() {
+    test('an immediate command throws an exception', function() {
+      expect.assertions(1)
+
+      const errorText = 'hardcoded exception'
+      const initialState = {
+        counter: 0,
+        undo: [],
+        foo: undefined
+      }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return Object.assign({}, state, {
+              undo: state.undo.concat(action.undo)
+            })
+          }
+          case COMMAND_ENDED_MSG: {
+            return matchAction(action, {
+              Error: () => {
+                return state
+              },
+              Ok: value => {
+                expect(value).toEqual(expect.anything())
+                return state
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+        } else if (isChanged(state => state.undo)) {
+          return testCommands.queuedDelayedValueCmd(
+            10,
+            'something',
+            COMMAND_ENDED_MSG
+          )
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      try {
+        store.dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+      } catch (e) {}
+      return store.dispatch({ type: ADD_UNDO, undo: 0 })
+    })
+
+    test('a queued command throws an exception', function() {
+      expect.assertions(1)
+
+      const errorText = 'hardcoded exception'
+      const initialState = {
+        counter: 0,
+        undo: [],
+        foo: undefined
+      }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return Object.assign({}, state, {
+              undo: state.undo.concat(action.undo)
+            })
+          }
+          case COMMAND_ENDED_MSG: {
+            return matchAction(action, {
+              Error: () => {
+                return state
+              },
+              Ok: value => {
+                expect(value).toEqual(expect.anything())
+                return state
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedThrowCmd(errorText, COMMAND_ENDED_MSG)
+        } else if (isChanged(state => state.undo)) {
+          return testCommands.queuedDelayedValueCmd(
+            10,
+            'something',
+            COMMAND_ENDED_MSG
+          )
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store
+        .dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+        .catch(() => {})
+        .then(() => store.dispatch({ type: ADD_UNDO, undo: 0 }))
+    })
+
+    test('a queued command rejects', function() {
+      expect.assertions(2)
+
+      const errorText = 'hardcoded exception'
+      const initialState = {
+        counter: 0,
+        undo: [],
+        foo: undefined
+      }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return Object.assign({}, state, {
+              undo: state.undo.concat(action.undo)
+            })
+          }
+          case COMMAND_ENDED_MSG: {
+            return matchAction(action, {
+              Error: () => {
+                return state
+              },
+              Ok: value => {
+                expect(value).toEqual(expect.anything())
+                return state
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.queuedDelayedRejectCmd(
+            5,
+            errorText,
+            COMMAND_ENDED_MSG
+          )
+        } else if (isChanged(state => state.undo)) {
+          return testCommands.queuedDelayedValueCmd(
+            10,
+            'something',
+            COMMAND_ENDED_MSG
+          )
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      return store
+        .dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+        .catch(error => expect(error.message).toBe(errorText))
+        .then(() => store.dispatch({ type: ADD_UNDO, undo: 0 }))
+    })
+  })
 })
 
-test('should recover the queue after a provider returns a rejected promise', function(
-  t
-) {
-  t.plan(2)
+describe('dispatch', function() {
+  test('should not return a rejected promise if an immediate command returns a rejected promise', function() {
+    expect.assertions(1)
 
-  const FOO = 'FOO'
-  const initialState = {
-    counter: 0,
-    undo: [],
-    foo: undefined
-  }
-  const reducer = (state = initialState, action) => {
-    switch (action.type) {
-      case SET_COUNTER: {
-        return Object.assign({}, state, { counter: action.value })
-      }
-      case ADD_UNDO: {
-        return Object.assign({}, state, {
-          undo: state.undo.concat(action.undo)
-        })
-      }
-      case FOO: {
-        return Object.assign({}, state, {
-          foo: action.foo
-        })
-      }
-      default:
-        return state
+    const initialState = {
+      counter: 0
     }
-  }
-
-  const errorText = 'hardcoded exception'
-  const subscriber = ({ from, to }) => {
-    if (from.counter !== to.counter) {
-      return queuedThunkCmd(undo => {
-        return Promise.reject(new Error(errorText))
-      })
-    } else if (from.undo !== to.undo) {
-      return queuedThunkCmd(undo => {
-        try {
-          store.dispatch({ type: FOO, foo: 'foo' })
-        } catch (e) {}
-      })
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        default:
+          return state
+      }
     }
-  }
 
-  const {
-    middleware,
-    subscribe,
-    registerProviders
-  } = serialEffectsMiddleware.withExtraArgument()
-  subscribe(subscriber)
-  const store = createStore(reducer, initialState, applyMiddleware(middleware))
-  registerProviders(dispatchProvider(store.dispatch), thunkProvider())
+    const errorText = 'hardcoded exception'
+    const subscriber = () => {
+      return testCommands.immediateValueCmd(
+        Promise.reject(errorText),
+        COMMAND_ENDED_MSG
+      )
+    }
 
-  return store
-    .dispatch({
-      type: SET_COUNTER,
-      value: 1
-    })
-    .catch(() => t.pass('should have caught an exception'))
-    .then(() =>
-      store
-        .dispatch({ type: ADD_UNDO, undo: 0 })
-        .then(() =>
-          t.deepEqual(store.getState(), { counter: 1, undo: [0], foo: 'foo' })
-        )
+    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    subscribe(subscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
     )
+    registerExecutors(testExecutor.createExecutor())
+
+    return store
+      .dispatch({ type: SET_COUNTER, value: 1 })
+      .catch(e => {
+        throw new Error('this promise should not have been rejected', e)
+      })
+      .then(() => {
+        expect(store.getState()).toEqual({ counter: 1 })
+      })
+  })
+
+  describe('should throw the first exception', function() {
+    test('thrown by a subscriber', function() {
+      expect.assertions(1)
+
+      const initialState = {
+        counter: 0
+      }
+      const reducer = (state, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
+
+      const errorText = 'hardcoded exception'
+      const subscriber = () => {
+        throw new Error(errorText)
+      }
+
+      const { middleware, subscribe } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+
+      try {
+        store.dispatch({ type: SET_COUNTER, value: 1 })
+        throw new Error('exception not thrown')
+      } catch (e) {
+        expect(e.message).toEqual(errorText)
+      }
+    })
+
+    test('thrown by an immediate command', function() {
+      expect.assertions(1)
+
+      const errorText = 'hardcoded exception'
+      const initialState = {
+        counter: 0,
+        undo: [],
+        foo: undefined
+      }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case COMMAND_ENDED_MSG: {
+            return matchAction(action, {
+              Error: () => {
+                return state
+              },
+              Ok: value => {
+                throw new Error('command was expected to throw an exception')
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      expect(() =>
+        store.dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+      ).toThrow(new Error(errorText))
+    })
+
+    test('thrown by a subsequent immediate command', function() {
+      expect.assertions(1)
+
+      const errorText = 'hardcoded exception'
+      const initialState = {
+        counter: 0,
+        undo: [],
+        foo: undefined
+      }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          case ADD_UNDO: {
+            return matchAction(action, {
+              Error: error => {
+                throw new Error(`unexpected error: ${error}`)
+              },
+              Ok: undo => {
+                return Object.assign({}, state, {
+                  undo: state.undo.concat(undo)
+                })
+              }
+            })
+          }
+          case COMMAND_ENDED_MSG: {
+            return matchAction(action, {
+              Error: () => {
+                return state
+              },
+              Ok: value => {
+                throw new Error('command was expected to throw an exception')
+              }
+            })
+          }
+          default:
+            return state
+        }
+      }
+
+      const subscriber = ({ from, to, isChanged }) => {
+        if (isChanged(state => state.counter)) {
+          return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
+        } else if (from.undo !== to.undo) {
+          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+        }
+      }
+
+      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      subscribe(subscriber)
+      const store = createStore(
+        reducer,
+        initialState,
+        applyMiddleware(middleware)
+      )
+      registerExecutors(testExecutor.createExecutor())
+
+      expect(() =>
+        store.dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+      ).toThrow(new Error(errorText))
+    })
+  })
+
+  describe('should return a promise', function() {
+    describe('that resolves', function() {
+      test('when all commands of all subscribers have resolved', function() {
+        expect.assertions(2)
+
+        const FIRST_SIDE_EFFECT_MSG = 'FIRST_SIDE_EFFECT_MSG'
+        const SECOND_SIDE_EFFECT_MSG = 'SECOND_SIDE_EFFECT_MSG'
+        const THIRD_SIDE_EFFECT_MSG = 'THIRD_SIDE_EFFECT_MSG'
+        const FOURTH_SIDE_EFFECT_MSG = 'FOURTH_SIDE_EFFECT_MSG'
+        const initialState = {
+          counter: 0,
+          firstAction: false,
+          secondAction: false,
+          thirdAction: false,
+          fourthAction: false
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case FIRST_SIDE_EFFECT_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: () => {
+                  return Object.assign({}, state, { firstAction: true })
+                }
+              })
+            }
+            case SECOND_SIDE_EFFECT_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: () => {
+                  return Object.assign({}, state, { secondAction: true })
+                }
+              })
+            }
+            case THIRD_SIDE_EFFECT_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: () => {
+                  return Object.assign({}, state, { thirdAction: true })
+                }
+              })
+            }
+            case FOURTH_SIDE_EFFECT_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: () => {
+                  return Object.assign({}, state, { fourthAction: true })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const firstSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return [
+              testCommands.queuedDelayedValueCmd(
+                10,
+                'something',
+                FIRST_SIDE_EFFECT_MSG
+              ),
+              testCommands.queuedDelayedValueCmd(
+                5,
+                'something',
+                SECOND_SIDE_EFFECT_MSG
+              )
+            ]
+          }
+        }
+
+        const secondSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return [
+              testCommands.queuedDelayedValueCmd(
+                20,
+                'something',
+                THIRD_SIDE_EFFECT_MSG
+              ),
+              testCommands.queuedDelayedValueCmd(
+                15,
+                'something',
+                FOURTH_SIDE_EFFECT_MSG
+              )
+            ]
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(firstSubscriber)
+        subscribe(secondSubscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        const subscriberPromise = store.dispatch({
+          type: SET_COUNTER,
+          value: 1
+        })
+
+        return subscriberPromise.then(() => {
+          expect(
+            store.getState().firstAction && store.getState().secondAction
+          ).toBe(true)
+          expect(
+            store.getState().thirdAction && store.getState().fourthAction
+          ).toBe(true)
+        })
+      })
+
+      test('only after all related/subsequent commands are resolved', function() {
+        expect.assertions(1)
+
+        const FLOW_COMPLETE_MSG = 'FLOW_COMPLETE_MSG'
+        const initialState = {
+          counter: 0,
+          undo: [],
+          done: false
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            case FLOW_COMPLETE_MSG: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    done: true
+                  })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const firstSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedValueCmd(
+              20,
+              from.counter,
+              ADD_UNDO
+            )
+          }
+        }
+
+        const secondSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.undo)) {
+            return testCommands.queuedDelayedValueCmd(
+              20,
+              'something',
+              FLOW_COMPLETE_MSG
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(firstSubscriber)
+        subscribe(secondSubscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({
+            type: SET_COUNTER,
+            value: 1
+          })
+          .then(() => {
+            expect(store.getState()).toMatchObject({
+              counter: 1,
+              undo: [0],
+              done: true
+            })
+          })
+      })
+
+      test('even when an immediate command returns a rejected promise', function() {
+        expect.assertions(1)
+
+        const errorText = 'hardcoded exception'
+        const initialState = {
+          counter: 0,
+          undo: [],
+          foo: undefined
+        }
+        const reducer = (state = initialState, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return Object.assign({}, state, {
+                undo: state.undo.concat(action.undo)
+              })
+            }
+            case COMMAND_ENDED_MSG: {
+              return matchAction(action, {
+                Error: () => {
+                  return state
+                },
+                Ok: value => {
+                  throw new Error('command was expected to fail')
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.immediateRejectCmd(errorText, COMMAND_ENDED_MSG)
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(subscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({
+            type: SET_COUNTER,
+            value: 1
+          })
+          .then(value => expect(value).toBeUndefined())
+      })
+    })
+
+    describe('that rejects', function() {
+      test('if at least one queued command rejects', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          root: {
+            counter: 0
+          }
+        }
+        const reducer = (state = initialState['root'], action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            default:
+              return state
+          }
+        }
+
+        const firstSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedValueCmd(
+              20,
+              'something',
+              'SOME_MSG'
+            )
+          }
+        }
+
+        const errorText = 'hardcoded rejection'
+        const secondSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedRejectCmd(
+              20,
+              errorText,
+              'ANOTHER_MSG'
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(combineSubscribers({ root: firstSubscriber }))
+        subscribe(combineSubscribers({ root: secondSubscriber }))
+        const store = createStore(
+          combineReducers({ root: reducer }),
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({
+            type: SET_COUNTER,
+            value: 1
+          })
+          .catch(e => {
+            expect(e.message).toEqual(errorText)
+          })
+      })
+
+      test('if a subsequent command throws an exception', function() {
+        expect.assertions(2)
+
+        const initialState = {
+          counter: 0,
+          undo: []
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const firstSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedValueCmd(
+              20,
+              from.counter,
+              ADD_UNDO
+            )
+          }
+        }
+
+        const errorText = 'hardcoded exception'
+        const secondSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.undo)) {
+            return testCommands.immediateThrowCmd(errorText, 'SOME_MSG')
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(firstSubscriber)
+        subscribe(secondSubscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({
+            type: SET_COUNTER,
+            value: 1
+          })
+          .catch(e => {
+            expect(e.message).toEqual(errorText)
+            expect(store.getState()).toEqual({
+              counter: 1,
+              undo: [0]
+            })
+          })
+      })
+
+      test('if a subsequent command rejects', function() {
+        expect.assertions(2)
+
+        const initialState = {
+          counter: 0,
+          undo: []
+        }
+        const reducer = (state, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            case ADD_UNDO: {
+              return matchAction(action, {
+                Error: error => {
+                  throw new Error(`unexpected error: ${error}`)
+                },
+                Ok: undo => {
+                  return Object.assign({}, state, {
+                    undo: state.undo.concat(undo)
+                  })
+                }
+              })
+            }
+            default:
+              return state
+          }
+        }
+
+        const firstSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.counter)) {
+            return testCommands.queuedDelayedValueCmd(
+              20,
+              from.counter,
+              ADD_UNDO
+            )
+          }
+        }
+
+        const errorText = 'hardcoded rejection'
+        const secondSubscriber = ({ from, to, isChanged }) => {
+          if (isChanged(state => state.undo)) {
+            return testCommands.queuedDelayedRejectCmd(
+              20,
+              errorText,
+              'SOME_MSG'
+            )
+          }
+        }
+
+        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        subscribe(firstSubscriber)
+        subscribe(secondSubscriber)
+        const store = createStore(
+          reducer,
+          initialState,
+          applyMiddleware(middleware)
+        )
+        registerExecutors(testExecutor.createExecutor())
+
+        return store
+          .dispatch({
+            type: SET_COUNTER,
+            value: 1
+          })
+          .catch(e => {
+            expect(e.message).toEqual(errorText)
+            expect(store.getState()).toEqual({
+              counter: 1,
+              undo: [0]
+            })
+          })
+      })
+    })
+  })
 })

@@ -1,5 +1,11 @@
 'use strict'
 
+const sink = () => {}
+
+const _match = (either, patterns) => {
+  return either.fold(patterns.Error || sink, patterns.Ok || sink)
+}
+
 const left = value => ({
   map(fn) {
     return this
@@ -9,6 +15,9 @@ const left = value => ({
   },
   chain(fn) {
     return this
+  },
+  match(patterns) {
+    return _match(this, patterns)
   },
   value
 })
@@ -22,6 +31,9 @@ const right = value => ({
   },
   chain(fn) {
     return fn(value)
+  },
+  match(patterns) {
+    return _match(this, patterns)
   },
   value
 })

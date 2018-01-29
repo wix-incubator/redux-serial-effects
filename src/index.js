@@ -1,26 +1,13 @@
 'use strict'
 
-const serialEffectsMiddleware = require('./middleware')
+const createMiddleware = require('./middleware')
 const combineSubscribers = require('./combineSubscribers')
-const {
-  create: dispatchCmd,
-  provider: dispatchProvider
-} = require('./commands/dispatch')
-const {
-  immediateThunkCmd,
-  queuedThunkCmd,
-  provider: thunkProvider
-} = require('./commands/thunk')
-const createCmd = require('./commands/base')
+const { createImmediateCmd, createQueuedCmd } = require('./commands')
+const { match: matchAction } = require('./action')
 
-module.exports.serialEffectsMiddleware = serialEffectsMiddleware
+module.exports.createMiddleware = createMiddleware
 module.exports.combineSubscribers = combineSubscribers
+module.exports.createImmediateCmd = createImmediateCmd
+module.exports.createQueuedCmd = createQueuedCmd
 
-module.exports.createCmd = createCmd
-
-module.exports.dispatchCmd = dispatchCmd
-module.exports.dispatchProvider = dispatchProvider
-
-module.exports.immediateThunkCmd = immediateThunkCmd
-module.exports.queuedThunkCmd = queuedThunkCmd
-module.exports.thunkProvider = thunkProvider
+module.exports.matchAction = matchAction

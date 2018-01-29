@@ -1,7 +1,7 @@
 {
   "name": "redux-serial-effects",
   "version": "0.0.4",
-  "description": "A middleware library for managing side-effects based on state changes, following an actual vs. expected philosophy, and supporting composability",
+  "description": "Predictable side-effect middleware for the predictable state container",
   "license": "MIT",
   "main": "dist/index.js",
   "config": {
@@ -13,17 +13,21 @@
     }
   },
   "scripts": {
-    "build": "babel src --presets babel-preset-es2015 --out-dir dist",
+    "build": "babel src --presets babel-preset-es2015 --ignore '__tests__' --out-dir dist",
     "eslint-check": "eslint --print-config .eslintrc.js | eslint-config-prettier-check",
     "lint": "eslint --cache --format codeframe --ext .js,.jsx .",
     "lint-staged": "lint-staged",
     "precommit": "lint-staged",
     "release": "wnpm-release --no-shrinkwrap",
-    "test": "nyc --reporter $([ -z \"$TEAMCITY_VERSION\" ] && echo text || echo teamcity) tape test/*.js | tap-$([ -z \"$test_reporter\" ] && echo spec || echo $test_reporter)",
-    "test:watch": "watchman-make -p '**/*.js' --run 'test_reporter=spec npm run test'"
+    "test": "jest --coverage",
+    "watch": "jest --watch --onlyChanged",
+    "watch:all": "jest --watch --coverage"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
+  },
+  "jest": {
+    "testResultsProcessor": "jest-teamcity-reporter"
   },
   "dependencies": {},
   "devDependencies": {
@@ -32,12 +36,14 @@
     "eslint": "^3.16.1",
     "eslint-config-prettier": "^2.4.0",
     "eslint-config-standard": "^7.0.0",
+    "eslint-plugin-jest": "^21.7.0",
     "eslint-plugin-lodash": "^2.4.0",
-    "eslint-plugin-mocha": "^4.8.0",
     "eslint-plugin-prettier": "^2.2.0",
     "eslint-plugin-promise": "^3.5.0",
     "eslint-plugin-standard": "^2.1.1",
     "husky": "^0.14.3",
+    "jest": "20.0.3",
+    "jest-teamcity-reporter": "0.9.0",
     "lint-staged": "^5.0.0",
     "nyc": "11.3.0",
     "prettier": "^1.7.0",

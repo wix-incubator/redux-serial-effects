@@ -1,35 +1,14 @@
 'use strict'
 
-// A redux extension to manage side-effects using expected vs. actual state.
-//
-// Consider a scenario where user activity triggeres I/O (e.g., API calls) that
-// might fail. Such failures usually mean tha the local app state is in an
-// inconsistent state relative to the server(s) state.
-//
-// The solution and strategy suggested by this module is to manage two copies of
-// the state: actual state, and expected state. When possible, implementations
-// should read the actual state from the environment (e.g., external services)
-// and compare the updated expected state against it.
-//
-// This middleware provides the following services on top of what Redux's
-// subscribers get:
-// 1. Access to both the previous and current state
-// 2. A queue of side-effects that run in order dispatched
-// 3. Ability to combine subscribers for composability
-
-const { flatten } = require('./utils/flatten')
 const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
+const { fromError, fromSuccess } = require('./action')
+const isChanged = require('./utils/isChanged')
 
 const isCmd = _ =>
-  _ != null && typeof _.deferred === 'boolean' && typeof _.type === 'string'
-const isImmediateCommand = _ => isCmd(_) && !_.deferred
-const isDeferredCommand = _ => isCmd(_) && _.deferred
-
-const isCmdOrPromise = maybeCmdOrPromise =>
-  isCmd(maybeCmdOrPromise) || isPromise(maybeCmdOrPromise)
-
-const not = fn => x => !fn(x)
+  _ != null && typeof _.isQueued === 'boolean' && typeof _.type === 'string'
+const isImmediateCommand = _ => isCmd(_) && !_.isQueued
+const isQueuedCommand = _ => isCmd(_) && _.isQueued
 
 const registrar = list => fn => {
   list.push(fn)
@@ -41,45 +20,80 @@ const registrar = list => fn => {
   }
 }
 
-const createSerialEffectsMiddleware = extraArgument => {
+const createMiddleware = extraArgument => {
   const subscribers = []
-  const providers = {}
+  const executors = {}
   let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
-    const runImmediateCommands = commands => {
-      const immediateCommands = commands.filter(isImmediateCommand)
-      const queuedCommands = sequence(
-        immediateCommands.map(cmd =>
-          try_(() => runImmediateCommands([].concat(providers[cmd.type](cmd))))
-        )
-      ).fold(
-        e => {
-          throw e
+    const executeCommand = cmd => {
+      const result = try_(() => executors[cmd.type](cmd.command))
+      return result.fold(
+        error => {
+          const downstreamPromise = cmd.actionType
+            ? store.dispatch(fromError(cmd.actionType, error))
+            : Promise.resolve()
+          return [result, downstreamPromise]
         },
-        cmd => cmd.filter(isCmdOrPromise)
+        value => {
+          if (isPromise(value)) {
+            const downstreamPromise = value.then(
+              resolvedValue => {
+                return cmd.actionType
+                  ? store.dispatch(fromSuccess(cmd.actionType, resolvedValue))
+                  : Promise.resolve()
+              },
+              error => {
+                if (cmd.actionType) {
+                  store
+                    .dispatch(fromError(cmd.actionType, error))
+                    .catch(() => {})
+                }
+                throw error
+              }
+            )
+            return [result, downstreamPromise]
+          } else {
+            const downstreamPromise = cmd.actionType
+              ? store.dispatch(fromSuccess(cmd.actionType, value))
+              : Promise.resolve()
+            return [result, downstreamPromise]
+          }
+        }
       )
-      return commands.filter(not(isImmediateCommand)).concat(queuedCommands)
     }
 
-    const runQueuedCommands = commands => {
-      const asyncCommands = commands.filter(isDeferredCommand)
-      const promises = flatten(
-        asyncCommands.map(cmd => providers[cmd.type](cmd))
-      ).filter(isCmdOrPromise)
-
-      return promises
+    const runImmediateCommands = commands => {
+      const immediateCommands = commands.filter(isImmediateCommand)
+      const promiseTuples = immediateCommands.map(executeCommand)
+      promiseTuples.map(tuple => tuple[0]).map(result =>
+        result.fold(error => {
+          throw error
+        }, value => value)
+      )
+      promiseTuples
+        .map(tuple => tuple[1])
+        .map(downstreamPromise => downstreamPromise.catch(() => {}))
+      return commands.filter(isQueuedCommand)
     }
 
     const executeQueuedCommands = (resolve, reject) => commands => {
       if (commands.length > 0) {
-        return Promise.all(runQueuedCommands(commands))
-          .then(flatten)
-          .then(additionalCommands => {
-            Promise.all(commands.filter(isPromise))
-              .then(() => queueAndRunCommands(additionalCommands))
-              .then(resolve, reject)
-          }, reject)
+        const promiseTuples = commands
+          .filter(isQueuedCommand)
+          .map(executeCommand)
+        Promise.all(promiseTuples.map(tuple => tuple[1])).then(
+          () => resolve(),
+          reject
+        )
+
+        return Promise.all(
+          promiseTuples.map(tuple => tuple[0]).map(result =>
+            result.fold(error => {
+              return Promise.reject(error)
+            }, value => value)
+          )
+        ).catch(reject)
       } else {
         resolve()
         return Promise.resolve()
@@ -124,13 +138,20 @@ const createSerialEffectsMiddleware = extraArgument => {
         subscribers
           .slice()
           .map(subscriber =>
-            try_(() => subscriber({ from, to }, extraArgument))
+            try_(() =>
+              subscriber(
+                { from, to, isChanged: isChanged(from, to) },
+                extraArgument
+              )
+            )
           )
       ).fold(
         e => {
           throw e
         },
-        commands => queueAndRunCommands(commands.filter(isCmd))
+        commands => {
+          return queueAndRunCommands(commands.filter(isCmd))
+        }
       )
     }
 
@@ -139,18 +160,15 @@ const createSerialEffectsMiddleware = extraArgument => {
 
   const subscribe = registrar(subscribers)
 
-  const registerProviders = (...args) => {
-    args.forEach(provider => (providers[provider.type] = provider.runner))
+  const registerExecutors = (...args) => {
+    args.forEach(executor => (executors[executor.type] = executor.execute))
   }
 
   return {
     middleware,
-    registerProviders,
+    registerExecutors,
     subscribe
   }
 }
 
-const serialEffectsMiddleware = createSerialEffectsMiddleware()
-serialEffectsMiddleware.withExtraArgument = createSerialEffectsMiddleware
-
-module.exports = serialEffectsMiddleware
+module.exports = createMiddleware
