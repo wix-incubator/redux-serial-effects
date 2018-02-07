@@ -26,6 +26,10 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/wix/redux-serial-effects.git"
+  },
   "jest": {
     "testResultsProcessor": "jest-teamcity-reporter"
   },
