@@ -20,8 +20,8 @@
     "precommit": "lint-staged",
     "release": "wnpm-release --no-shrinkwrap",
     "test": "jest --coverage",
-    "watch": "jest --watch --onlyChanged",
-    "watch:all": "jest --watch --coverage"
+    "watch": "jest --watch",
+    "watch:all": "jest --watchAll --coverage"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
