@@ -587,7 +587,7 @@ describe('middleware', function() {
     })
   })
 
-  test('should handle subscriber that do not generate commands', function() {
+  test('should handle subscribers that do not issue commands', function() {
     expect.assertions(1)
 
     const initialState = {
