@@ -11,7 +11,8 @@ describe('action', function() {
     const errorAction = action.fromError(ACTION_TYPE, 'error text')
     expect(errorAction).toEqual({
       type: ACTION_TYPE,
-      payload: { error: 'error text' }
+      error: true,
+      payload: 'error text'
     })
   })
 
@@ -19,7 +20,7 @@ describe('action', function() {
     const successAction = action.fromSuccess(ACTION_TYPE, 'success text')
     expect(successAction).toEqual({
       type: ACTION_TYPE,
-      payload: { ok: 'success text' }
+      payload: 'success text'
     })
   })
 

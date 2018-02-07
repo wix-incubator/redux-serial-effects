@@ -4,23 +4,24 @@ const { Either } = require('./utils/either')
 
 const fromError = (type, error) => ({
   type,
-  payload: { error }
+  error: true,
+  payload: error
 })
 const fromSuccess = (type, value) => ({
   type,
-  payload: { ok: value }
+  payload: value
 })
 
-const toEither = payload => {
-  if (payload.error !== undefined) {
-    return Either.Left(payload.error)
+const toEither = action => {
+  if (action.error === true) {
+    return Either.Left(action.payload)
   } else {
-    return Either.Right(payload.ok)
+    return Either.Right(action.payload)
   }
 }
 
 const match = (action, patterns) => {
-  return toEither(action.payload).match(patterns)
+  return toEither(action).match(patterns)
 }
 
 module.exports.fromError = fromError
