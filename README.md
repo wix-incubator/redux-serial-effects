@@ -71,7 +71,7 @@ const {
   createMiddleware,
   matchAction,
   createQueuedCmd
-} = require('../src/index')
+} = require('redux-serial-effects')
 
 // actions
 const SET_DISPLAY_ITEM = 'SET_DISPLAY_ITEM'
@@ -96,14 +96,14 @@ const remoteDataServiceClient = {
   }
 }
 
-const getDataFromRemoteServiceCmd = (id, action) =>
+const getDataFromRemoteServiceCmd = (id, actionType) =>
   createQueuedCmd(
     EXECUTOR_TYPE,
     {
       type: GET_DATA_BY_ID,
       id
     },
-    action
+    actionType
   )
 
 const setItemToDisplay = id => ({

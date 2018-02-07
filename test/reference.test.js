@@ -30,14 +30,14 @@ const remoteDataServiceClient = {
   }
 }
 
-const getDataFromRemoteServiceCmd = (id, action) =>
+const getDataFromRemoteServiceCmd = (id, actionType) =>
   createQueuedCmd(
     EXECUTOR_TYPE,
     {
       type: GET_DATA_BY_ID,
       id
     },
-    action
+    actionType
   )
 
 const setItemToDisplay = id => ({
@@ -88,8 +88,8 @@ test('reference implementation', function() {
 
   const getDisplayItemId = state => state.itemToDisplay.id
 
-  const subscriber = ({ from, to, isChanged }) => {
-    if (isChanged(getDisplayItemId)) {
+  const subscriber = ({ from, to, hasChanged }) => {
+    if (hasChanged(getDisplayItemId)) {
       return getDataFromRemoteServiceCmd(to.itemToDisplay.id, DATA_RESPONSE)
     }
   }

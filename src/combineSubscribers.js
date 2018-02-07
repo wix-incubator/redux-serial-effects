@@ -1,7 +1,7 @@
 'use strict'
 
 const { flatten } = require('./utils/flatten')
-const isChanged = require('./utils/isChanged')
+const createTransition = require('./utils/transition')
 
 const combineSubscribers = subscriberMap => (transition, extraArgument) =>
   flatten(
@@ -10,11 +10,7 @@ const combineSubscribers = subscriberMap => (transition, extraArgument) =>
         transition.from[key] !== transition.to[key] && subscriberMap[key]
           ? [].concat(
               subscriberMap[key](
-                {
-                  from: transition.from[key],
-                  to: transition.to[key],
-                  isChanged: isChanged(transition.from[key], transition.to[key])
-                },
+                createTransition(transition.from[key], transition.to[key]),
                 extraArgument
               )
             )

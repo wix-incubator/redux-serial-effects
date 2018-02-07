@@ -3,7 +3,7 @@
 const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
 const { fromError, fromSuccess } = require('./action')
-const isChanged = require('./utils/isChanged')
+const createTransition = require('./utils/transition')
 
 const isCmd = _ =>
   _ != null && typeof _.isQueued === 'boolean' && typeof _.type === 'string'
@@ -138,12 +138,7 @@ const createMiddleware = extraArgument => {
         subscribers
           .slice()
           .map(subscriber =>
-            try_(() =>
-              subscriber(
-                { from, to, isChanged: isChanged(from, to) },
-                extraArgument
-              )
-            )
+            try_(() => subscriber(createTransition(from, to), extraArgument))
           )
       ).fold(
         e => {

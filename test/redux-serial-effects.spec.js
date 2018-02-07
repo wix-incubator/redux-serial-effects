@@ -43,7 +43,7 @@ describe('combineSubscribers', function() {
     }
 
     const triggeredSubscribers = []
-    const subscriber = index => ({ from, to, isChanged }) => {
+    const subscriber = index => ({ from, to, hasChanged }) => {
       triggeredSubscribers.push(index)
     }
 
@@ -70,50 +70,379 @@ describe('combineSubscribers', function() {
     })
   })
 
-  test('should provide a pre-applied isChanged function', function() {
-    expect.assertions(2)
+  describe('should pass subscribers', function() {
+    test('the extra argument given when creating the middleware', function() {
+      expect.assertions(1)
 
-    const getValue = state => state.value
-    const initialState = {
-      counterOne: { value: 0 },
-      counterTwo: { value: 1 },
-      counterThree: { value: 2 }
-    }
-    const reducer = index => (state = { value: index }, action) => {
-      switch (action.type) {
-        case SET_COUNTER: {
-          return action.value !== state.value
-            ? Object.assign({}, state, { value: action.value })
-            : state
-        }
-        default:
-          return state
+      const initialState = {
+        counter: 0
       }
-    }
+      const reducer = (state = initialState, action) => {
+        switch (action.type) {
+          case SET_COUNTER: {
+            return Object.assign({}, state, { counter: action.value })
+          }
+          default:
+            return state
+        }
+      }
 
-    const subscriber = index => ({ from, to, isChanged }) => {
-      expect(isChanged(getValue)).toBe(true)
-    }
+      const extra = Symbol('extra')
 
-    const { middleware, subscribe } = createMiddleware()
-    subscribe(
-      combineSubscribers({
-        counterOne: subscriber(0),
-        counterTwo: subscriber(1),
-        counterThree: subscriber(2)
+      const subscriber = ({ from, to }, extraArgument) => {
+        expect(extra).toEqual(extraArgument)
+      }
+
+      const { middleware, subscribe } = createMiddleware(extra)
+      subscribe(combineSubscribers({ substate: subscriber }))
+      const store = createStore(
+        combineReducers({ substate: reducer }),
+        applyMiddleware(middleware)
+      )
+
+      return store.dispatch({ type: SET_COUNTER, value: 1 })
+    })
+
+    describe('a transition object', function() {
+      test('with the previous state and the new state', function() {
+        expect.assertions(1)
+
+        const initialState = {
+          counter: 0
+        }
+        const reducer = (state = initialState, action) => {
+          switch (action.type) {
+            case SET_COUNTER: {
+              return Object.assign({}, state, { counter: action.value })
+            }
+            default:
+              return state
+          }
+        }
+
+        const subscriber = states => {
+          expect(states).toMatchObject({
+            from: initialState,
+            to: { counter: 1 }
+          })
+        }
+
+        const { middleware, subscribe } = createMiddleware()
+        subscribe(combineSubscribers({ substate: subscriber }))
+        const store = createStore(
+          combineReducers({ substate: reducer }),
+          applyMiddleware(middleware)
+        )
+
+        return store.dispatch({ type: SET_COUNTER, value: 1 })
       })
-    )
-    const store = createStore(
-      combineReducers({
-        counterOne: reducer(0),
-        counterTwo: reducer(1),
-        counterThree: reducer(2)
-      }),
-      initialState,
-      applyMiddleware(middleware)
-    )
 
-    store.dispatch({ type: SET_COUNTER, value: 1 })
+      describe('with a hasChanged function', function() {
+        test('pre-bound to the current transition', function() {
+          expect.assertions(2)
+
+          const getCount = state => state.counter
+          const getName = state => state.name
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state = initialState, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChanged }) => {
+            expect(hasChanged(getCount)).toBe(true)
+            expect(hasChanged(getName)).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(combineSubscribers({ substate: subscriber }))
+          const store = createStore(
+            combineReducers({ substate: reducer }),
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that returns true when a part of the state has changed', function() {
+          expect.assertions(1)
+
+          const getProperties = state => state.properties
+
+          const initialState = {
+            counter: 0,
+            properties: {
+              name: 'number of tests'
+            }
+          }
+          const reducer = (state = initialState, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChanged }) => {
+            expect(hasChanged(getProperties)).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(combineSubscribers({ substate: subscriber }))
+          const store = createStore(
+            combineReducers({ substate: reducer }),
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+      })
+
+      describe('with a hasChangedToMatch function', function() {
+        test('that returns true when the selected state has changed to match the predicate', function() {
+          expect.assertions(1)
+
+          const getCount = state => state.counter
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state = initialState, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(hasChangedToMatch(getCount, _ => _ === 1)).toBe(true)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(combineSubscribers({ substate: subscriber }))
+          const store = createStore(
+            combineReducers({ substate: reducer }),
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that returns false when the selected state has changed and does not match the predicate', function() {
+          expect.assertions(1)
+
+          const getCount = state => state.counter
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state = initialState, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(hasChangedToMatch(getCount, _ => _ === 1)).toBe(true)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(combineSubscribers({ substate: subscriber }))
+          const store = createStore(
+            combineReducers({ substate: reducer }),
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that returns false if the selected state has not changed', function() {
+          expect.assertions(1)
+
+          const getProperties = state => state.properties
+
+          const initialState = {
+            counter: 0,
+            properties: {
+              name: 'number of tests'
+            }
+          }
+          const SET_NAME = 'SET_NAME'
+          const reducer = (state = initialState, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              case SET_NAME: {
+                return Object.assign({}, state, {
+                  properties: Object.assign({}, state.properties, {
+                    name: action.name
+                  })
+                })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(
+              hasChangedToMatch(getProperties, _ => _ === 'number of tests')
+            ).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(combineSubscribers({ substate: subscriber }))
+          const store = createStore(
+            combineReducers({ substate: reducer }),
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+      })
+      ;[
+        { matcher: 'hasChangedToTrue', matches: true },
+        { matcher: 'hasChangedToFalse', matches: false },
+        { matcher: 'hasChangedToNull', matches: null },
+        { matcher: 'hasChangedToNotNull', matches: null, negate: true }
+      ].forEach(({ matcher, matches, negate }) => {
+        describe(`with a ${matcher} function`, function() {
+          test(`that returns true when the selected state has changed and is ${
+            negate ? 'not ' : ''
+          }${matches}`, function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              value: negate ? matches : !matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state = initialState, action) => {
+              switch (action.type) {
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(true)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(combineSubscribers({ substate: subscriber }))
+            const store = createStore(
+              combineReducers({ substate: reducer }),
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({
+              type: SET_VALUE,
+              value: negate ? !matches : matches
+            })
+          })
+
+          test(`that returns false if the selected state has changed and is ${
+            negate ? '' : 'not '
+          }${matches}`, function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              value: negate ? !matches : matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state = initialState, action) => {
+              switch (action.type) {
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(false)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(combineSubscribers({ substate: subscriber }))
+            const store = createStore(
+              combineReducers({ substate: reducer }),
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({
+              type: SET_VALUE,
+              value: negate ? matches : !matches
+            })
+          })
+
+          test('that returns false if the selected state has not changed', function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              counter: 0,
+              value: matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state = initialState, action) => {
+              switch (action.type) {
+                case SET_COUNTER: {
+                  return Object.assign({}, state, { counter: action.value })
+                }
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(false)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(combineSubscribers({ substate: subscriber }))
+            const store = createStore(
+              combineReducers({ substate: reducer }),
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({ type: SET_COUNTER, value: 1 })
+          })
+        })
+      })
+    })
   })
 })
 
@@ -164,7 +493,7 @@ describe('middleware', function() {
     }
 
     let subscriberCalled = false
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       subscriberCalled = true
     }
 
@@ -202,7 +531,7 @@ describe('middleware', function() {
     }
 
     let subscriberCalled = false
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       subscriberCalled = true
     }
 
@@ -241,7 +570,7 @@ describe('middleware', function() {
     }
 
     let subscriberCalled = false
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       subscriberCalled = true
     }
 
@@ -274,7 +603,7 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => {}
+    const subscriber = ({ from, to, hasChanged }) => {}
 
     const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
@@ -305,7 +634,7 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => []
+    const subscriber = ({ from, to, hasChanged }) => []
 
     const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
@@ -337,7 +666,7 @@ describe('middleware', function() {
     }
 
     let shouldThrow = true
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       if (shouldThrow) {
         shouldThrow = false
         throw new Error('hardcoded exception')
@@ -390,7 +719,7 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
         return testCommands.immediateValueCmd(true, VALUE_ACTION)
       }
@@ -436,7 +765,7 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
         return testCommands.queuedDelayedValueCmd(10, true, VALUE_ACTION)
       }
@@ -483,7 +812,7 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => {
+    const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
         return [
           testCommands.queuedDelayedValueCmd('BOGUS_ACTION', 1000),
@@ -548,8 +877,8 @@ describe('middleware', function() {
       }
     }
 
-    const subscriber = ({ from, to, isChanged }) => {
-      if (isChanged(state => state.counter)) {
+    const subscriber = ({ from, to, hasChanged }) => {
+      if (hasChanged(state => state.counter)) {
         return [
           testCommands.immediateValueCmd(from.counter, ADD_UNDO),
           testCommands.queuedDelayedValueCmd(20, true, FLOW_COMPLETE_MSG)
@@ -599,7 +928,7 @@ describe('middleware', function() {
 
       const extra = Symbol('extra')
 
-      const subscriber = ({ from, to, isChanged }, extraArgument) => {
+      const subscriber = ({ from, to, hasChanged }, extraArgument) => {
         expect(extra).toEqual(extraArgument)
       }
 
@@ -649,7 +978,7 @@ describe('middleware', function() {
         return store.dispatch({ type: SET_COUNTER, value: 1 })
       })
 
-      describe('with an isChanged function', function() {
+      describe('with a hasChanged function', function() {
         test('pre-bound to the current transition', function() {
           expect.assertions(2)
 
@@ -670,9 +999,9 @@ describe('middleware', function() {
             }
           }
 
-          const subscriber = ({ from, to, isChanged }) => {
-            expect(isChanged(getCount)).toBe(true)
-            expect(isChanged(getName)).toBe(false)
+          const subscriber = ({ from, to, hasChanged }) => {
+            expect(hasChanged(getCount)).toBe(true)
+            expect(hasChanged(getName)).toBe(false)
           }
 
           const { middleware, subscribe } = createMiddleware()
@@ -686,7 +1015,7 @@ describe('middleware', function() {
           return store.dispatch({ type: SET_COUNTER, value: 1 })
         })
 
-        test('that performs deep equality on objects', function() {
+        test('that returns true when a part of the state has changed', function() {
           expect.assertions(1)
 
           const getProperties = state => state.properties
@@ -707,8 +1036,8 @@ describe('middleware', function() {
             }
           }
 
-          const subscriber = ({ from, to, isChanged }) => {
-            expect(isChanged(getProperties)).toBe(false)
+          const subscriber = ({ from, to, hasChanged }) => {
+            expect(hasChanged(getProperties)).toBe(false)
           }
 
           const { middleware, subscribe } = createMiddleware()
@@ -720,6 +1049,246 @@ describe('middleware', function() {
           )
 
           return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+      })
+
+      describe('with a hasChangedToMatch function', function() {
+        test('that returns true when the selected state has changed to match the predicate', function() {
+          expect.assertions(1)
+
+          const getCount = state => state.counter
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(hasChangedToMatch(getCount, _ => _ === 1)).toBe(true)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(subscriber)
+          const store = createStore(
+            reducer,
+            initialState,
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that returns false when the selected state has changed and does not match the predicate', function() {
+          expect.assertions(1)
+
+          const getCount = state => state.counter
+
+          const initialState = {
+            counter: 0,
+            name: 'number of tests'
+          }
+          const reducer = (state, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(hasChangedToMatch(getCount, _ => _ === 1)).toBe(true)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(subscriber)
+          const store = createStore(
+            reducer,
+            initialState,
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+
+        test('that returns false if the selected state has not changed', function() {
+          expect.assertions(1)
+
+          const getProperties = state => state.properties
+
+          const initialState = {
+            counter: 0,
+            properties: {
+              name: 'number of tests'
+            }
+          }
+          const SET_NAME = 'SET_NAME'
+          const reducer = (state, action) => {
+            switch (action.type) {
+              case SET_COUNTER: {
+                return Object.assign({}, state, { counter: action.value })
+              }
+              case SET_NAME: {
+                return Object.assign({}, state, {
+                  properties: Object.assign({}, state.properties, {
+                    name: action.name
+                  })
+                })
+              }
+              default:
+                return state
+            }
+          }
+
+          const subscriber = ({ from, to, hasChangedToMatch }) => {
+            expect(
+              hasChangedToMatch(getProperties, _ => _ === 'number of tests')
+            ).toBe(false)
+          }
+
+          const { middleware, subscribe } = createMiddleware()
+          subscribe(subscriber)
+          const store = createStore(
+            reducer,
+            initialState,
+            applyMiddleware(middleware)
+          )
+
+          return store.dispatch({ type: SET_COUNTER, value: 1 })
+        })
+      })
+      ;[
+        { matcher: 'hasChangedToTrue', matches: true },
+        { matcher: 'hasChangedToFalse', matches: false },
+        { matcher: 'hasChangedToNull', matches: null },
+        { matcher: 'hasChangedToNotNull', matches: null, negate: true }
+      ].forEach(({ matcher, matches, negate }) => {
+        describe(`with a ${matcher} function`, function() {
+          test(`that returns true when the selected state has changed and is ${
+            negate ? 'not ' : ''
+          }${matches}`, function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              value: negate ? matches : !matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state, action) => {
+              switch (action.type) {
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(true)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(subscriber)
+            const store = createStore(
+              reducer,
+              initialState,
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({
+              type: SET_VALUE,
+              value: negate ? !matches : matches
+            })
+          })
+
+          test(`that returns false if the selected state has changed and is ${
+            negate ? '' : 'not '
+          }${matches}`, function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              value: negate ? !matches : matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state, action) => {
+              switch (action.type) {
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(false)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(subscriber)
+            const store = createStore(
+              reducer,
+              initialState,
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({
+              type: SET_VALUE,
+              value: negate ? matches : !matches
+            })
+          })
+
+          test('that returns false if the selected state has not changed', function() {
+            expect.assertions(1)
+
+            const getValue = state => state.value
+
+            const initialState = {
+              counter: 0,
+              value: matches
+            }
+            const SET_VALUE = 'SET_VALUE'
+            const reducer = (state, action) => {
+              switch (action.type) {
+                case SET_COUNTER: {
+                  return Object.assign({}, state, { counter: action.value })
+                }
+                case SET_VALUE: {
+                  return Object.assign({}, state, { value: action.value })
+                }
+                default:
+                  return state
+              }
+            }
+
+            const subscriber = transition => {
+              expect(transition[matcher](getValue)).toBe(false)
+            }
+
+            const { middleware, subscribe } = createMiddleware()
+            subscribe(subscriber)
+            const store = createStore(
+              reducer,
+              initialState,
+              applyMiddleware(middleware)
+            )
+
+            return store.dispatch({ type: SET_COUNTER, value: 1 })
+          })
         })
       })
     })
@@ -745,8 +1314,8 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateValueCmd('some value')
         }
       }
@@ -785,8 +1354,8 @@ describe('middleware', function() {
       }
 
       const errorText = 'hardcoded exception'
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateThrowCmd(errorText)
         }
       }
@@ -824,8 +1393,8 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedDelayedValueCmd(10, 'something')
         }
       }
@@ -864,8 +1433,8 @@ describe('middleware', function() {
       }
 
       const errorText = 'hardcoded rejection'
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedDelayedRejectCmd(10, errorText)
         }
       }
@@ -906,8 +1475,8 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateValueCmd('some value', COMMAND_ENDED_MSG)
         }
       }
@@ -945,8 +1514,8 @@ describe('middleware', function() {
       }
 
       const errorText = 'hardcoded exception'
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
         }
       }
@@ -985,8 +1554,8 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedDelayedValueCmd(
             10,
             'something',
@@ -1028,8 +1597,8 @@ describe('middleware', function() {
       }
 
       const errorText = 'hardcoded rejection'
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedDelayedRejectCmd(
             10,
             errorText,
@@ -1082,10 +1651,10 @@ describe('middleware', function() {
         }
 
         const errorText = 'hardcoded exception'
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.immediateRejectCmd(errorText, ADD_UNDO)
-          } else if (isChanged(state => state.error)) {
+          } else if (hasChanged(state => state.error)) {
             return testCommands.queuedRejectCmd(errorText, COMMAND_ENDED_MSG)
           }
         }
@@ -1125,8 +1694,8 @@ describe('middleware', function() {
         }
 
         const errorText = 'hardcoded rejection'
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedRejectCmd(
               10,
               errorText,
@@ -1178,8 +1747,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
           }
         }
@@ -1228,8 +1797,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.immediateThrowCmd(errorMsg, COMMAND_ENDED_MSG)
           }
         }
@@ -1276,8 +1845,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedValueCmd(
               10,
               successValue,
@@ -1326,8 +1895,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedRejectCmd(
               10,
               errorMsg,
@@ -1385,7 +1954,7 @@ describe('middleware', function() {
         }
       })
 
-      const subscriber = ({ from, to, isChanged }) => {
+      const subscriber = ({ from, to, hasChanged }) => {
         if (to.counter === 1) {
           return testCommands.immediateValueCmd(
             'BOGUS_ACTION',
@@ -1461,8 +2030,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(getCounter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(getCounter)) {
             if (to.counter === 1) {
               return testCommands.queuedDelayedValueCmd(
                 20,
@@ -1472,7 +2041,7 @@ describe('middleware', function() {
             } else if (to.counter === 2) {
               return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
             }
-          } else if (isChanged(getResolved)) {
+          } else if (hasChanged(getResolved)) {
             expect(to.undo).toEqual([0])
           }
         }
@@ -1534,8 +2103,8 @@ describe('middleware', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(getCounter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(getCounter)) {
             if (to.counter === 1) {
               return testCommands.queuedDelayedRejectCmd(
                 20,
@@ -1545,7 +2114,7 @@ describe('middleware', function() {
             } else if (to.counter === 2) {
               return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
             }
-          } else if (isChanged(getResolved)) {
+          } else if (hasChanged(getResolved)) {
             expect(to.error).toBe(true)
           }
         }
@@ -1603,10 +2172,10 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
-        } else if (isChanged(state => state.undo)) {
+        } else if (hasChanged(state => state.undo)) {
           return testCommands.queuedDelayedValueCmd(
             10,
             'something',
@@ -1668,10 +2237,10 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedThrowCmd(errorText, COMMAND_ENDED_MSG)
-        } else if (isChanged(state => state.undo)) {
+        } else if (hasChanged(state => state.undo)) {
           return testCommands.queuedDelayedValueCmd(
             10,
             'something',
@@ -1733,14 +2302,14 @@ describe('middleware', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.queuedDelayedRejectCmd(
             5,
             errorText,
             COMMAND_ENDED_MSG
           )
-        } else if (isChanged(state => state.undo)) {
+        } else if (hasChanged(state => state.undo)) {
           return testCommands.queuedDelayedValueCmd(
             10,
             'something',
@@ -1880,8 +2449,8 @@ describe('dispatch', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
         }
       }
@@ -1944,8 +2513,8 @@ describe('dispatch', function() {
         }
       }
 
-      const subscriber = ({ from, to, isChanged }) => {
-        if (isChanged(state => state.counter)) {
+      const subscriber = ({ from, to, hasChanged }) => {
+        if (hasChanged(state => state.counter)) {
           return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
         } else if (from.undo !== to.undo) {
           return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
@@ -2036,8 +2605,8 @@ describe('dispatch', function() {
           }
         }
 
-        const firstSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const firstSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return [
               testCommands.queuedDelayedValueCmd(
                 10,
@@ -2053,8 +2622,8 @@ describe('dispatch', function() {
           }
         }
 
-        const secondSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const secondSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return [
               testCommands.queuedDelayedValueCmd(
                 20,
@@ -2138,8 +2707,8 @@ describe('dispatch', function() {
           }
         }
 
-        const firstSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const firstSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedValueCmd(
               20,
               from.counter,
@@ -2148,8 +2717,8 @@ describe('dispatch', function() {
           }
         }
 
-        const secondSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.undo)) {
+        const secondSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.undo)) {
             return testCommands.queuedDelayedValueCmd(
               20,
               'something',
@@ -2216,8 +2785,8 @@ describe('dispatch', function() {
           }
         }
 
-        const subscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const subscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.immediateRejectCmd(errorText, COMMAND_ENDED_MSG)
           }
         }
@@ -2259,8 +2828,8 @@ describe('dispatch', function() {
           }
         }
 
-        const firstSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const firstSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedValueCmd(
               20,
               'something',
@@ -2270,8 +2839,8 @@ describe('dispatch', function() {
         }
 
         const errorText = 'hardcoded rejection'
-        const secondSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const secondSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedRejectCmd(
               20,
               errorText,
@@ -2329,8 +2898,8 @@ describe('dispatch', function() {
           }
         }
 
-        const firstSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const firstSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedValueCmd(
               20,
               from.counter,
@@ -2340,8 +2909,8 @@ describe('dispatch', function() {
         }
 
         const errorText = 'hardcoded exception'
-        const secondSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.undo)) {
+        const secondSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.undo)) {
             return testCommands.immediateThrowCmd(errorText, 'SOME_MSG')
           }
         }
@@ -2399,8 +2968,8 @@ describe('dispatch', function() {
           }
         }
 
-        const firstSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.counter)) {
+        const firstSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.counter)) {
             return testCommands.queuedDelayedValueCmd(
               20,
               from.counter,
@@ -2410,8 +2979,8 @@ describe('dispatch', function() {
         }
 
         const errorText = 'hardcoded rejection'
-        const secondSubscriber = ({ from, to, isChanged }) => {
-          if (isChanged(state => state.undo)) {
+        const secondSubscriber = ({ from, to, hasChanged }) => {
+          if (hasChanged(state => state.undo)) {
             return testCommands.queuedDelayedRejectCmd(
               20,
               errorText,
