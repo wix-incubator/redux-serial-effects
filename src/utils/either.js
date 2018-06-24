@@ -1,12 +1,28 @@
+// @flow
 'use strict'
+
+export type EitherPattern<A, B, C: *> = {
+  Error: A => C,
+  Ok: B => C
+}
+
+type EitherType<A: *, B: *> = {
+  map: <C: *>((B) => C) => EitherType<A, C>,
+  fold: <C: *>((A) => C, (B) => C) => C,
+  chain: <C: *>((B) => EitherType<A, C>) => EitherType<A, C>,
+  match: <C: *>(EitherPattern<A, B, C>) => C
+}
 
 const sink = () => {}
 
-const _match = (either, patterns) => {
+const _match = <A, B, C>(
+  either: EitherType<A, B>,
+  patterns: EitherPattern<A, B, C>
+): C => {
   return either.fold(patterns.Error || sink, patterns.Ok || sink)
 }
 
-const left = value => ({
+const left = <T>(value: T): EitherType<T, *> => ({
   map(fn) {
     return this
   },
@@ -22,9 +38,9 @@ const left = value => ({
   value
 })
 
-const right = value => ({
+const right = <T>(value: T): EitherType<*, T> => ({
   map(fn) {
-    return Right(fn(value))
+    return right(fn(value))
   },
   fold(f, g) {
     return g(value)
@@ -38,29 +54,30 @@ const right = value => ({
   value
 })
 
-const Left = value => Object.assign(Object.create(null), left(value))
-const Right = value => Object.assign(Object.create(null), right(value))
-
-const sequence = eitherList => {
+const sequence = <A, B>(
+  eitherList: EitherType<A, B | B[]>[]
+): EitherType<A, B[]> => {
   return eitherList.reduce(
     (acc, either) => acc.chain(list => either.map(value => list.concat(value))),
-    Right([])
+    right([])
   )
 }
 
-const try_ = fn => {
+const try_ = <T>(fn: () => T): EitherType<Error, T> => {
   try {
-    return Right(fn())
+    return right(fn())
   } catch (e) {
-    return Left(e)
+    return left(e)
   }
 }
 
 const Either = {
-  Left,
-  Right
+  Left: left,
+  Right: right
 }
 
-module.exports.Either = Either
-module.exports.sequence = sequence
-module.exports.try_ = try_
+module.exports = {
+  Either,
+  sequence,
+  try_
+}

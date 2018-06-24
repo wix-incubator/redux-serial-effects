@@ -1,9 +1,16 @@
+// @flow
 'use strict'
 
 const { flatten } = require('./utils/flatten')
 const createTransition = require('./utils/transition')
 
-const combineSubscribers = subscriberMap => (transition, extraArgument) =>
+import type { Transition } from './utils/transition'
+import type { Subscriber } from './middleware'
+
+const combineSubscribers = (subscriberMap: { [string]: Subscriber }) => (
+  transition: Transition,
+  extraArgument: ?mixed
+) =>
   flatten(
     Object.keys(subscriberMap).map(
       key =>

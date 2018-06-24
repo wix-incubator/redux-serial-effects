@@ -1,13 +1,31 @@
+// @flow
 'use strict'
 
 const { Either } = require('./utils/either')
 
-const fromError = (type, error) => ({
+import type { EitherPattern } from './utils/either'
+
+type SuccessAction = {
+  type: string,
+  error?: false,
+  payload: *
+}
+
+type FailureAction = {
+  type: string,
+  error: true,
+  payload: Error
+}
+
+type Action = SuccessAction | FailureAction
+
+const fromError = (type: string, error: Error): Action => ({
   type,
   error: true,
   payload: error
 })
-const fromSuccess = (type, value) => ({
+
+const fromSuccess = <T: *>(type: string, value: T): Action => ({
   type,
   payload: value
 })
@@ -20,10 +38,12 @@ const toEither = action => {
   }
 }
 
-const match = (action, patterns) => {
+const match = <T>(action: Action, patterns: EitherPattern<Error, *, T>): T => {
   return toEither(action).match(patterns)
 }
 
-module.exports.fromError = fromError
-module.exports.fromSuccess = fromSuccess
-module.exports.match = match
+module.exports = {
+  fromError,
+  fromSuccess,
+  match
+}

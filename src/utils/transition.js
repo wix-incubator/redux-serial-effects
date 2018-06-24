@@ -1,7 +1,21 @@
+// @flow
 'use strict'
 
-module.exports = (from, to) => {
-  const transition = {
+type Selector = Object => *
+
+export type Transition = {
+  from: {},
+  to: {},
+  hasChanged: Selector => boolean,
+  hasChangedToMatch: (Selector, (Object) => boolean) => boolean,
+  hasChangedToTrue: Selector => boolean,
+  hasChangedToFalse: Selector => boolean,
+  hasChangedToNull: Selector => boolean,
+  hasChangedToNotNull: Selector => boolean
+}
+
+module.exports = (from: {}, to: {}) => {
+  const transition: Transition = {
     from,
     to,
     hasChanged: selector => selector(from) !== selector(to),
