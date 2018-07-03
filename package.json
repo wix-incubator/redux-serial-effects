@@ -15,7 +15,7 @@
   "scripts": {
     "build": "babel src --presets babel-preset-env --ignore '__tests__' --out-dir dist",
     "eslint-check": "eslint --print-config .eslintrc.js | eslint-config-prettier-check",
-    "lint": "eslint --cache --format codeframe --ext .js,.jsx .",
+    "lint": "eslint --cache --format codeframe --ext .js,.jsx . --ignore-path .gitignore",
     "lint-staged": "lint-staged",
     "precommit": "lint-staged",
     "release": "wnpm-release --no-shrinkwrap",
