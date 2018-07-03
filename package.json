@@ -31,7 +31,8 @@
     "url": "git+ssh://git@github.com/wix/redux-serial-effects.git"
   },
   "jest": {
-    "testResultsProcessor": "jest-teamcity-reporter"
+    "testResultsProcessor": "jest-teamcity-reporter",
+    "testPathIgnorePatterns": ["/node_modules/", "/dist/", "/.history/"]
   },
   "dependencies": {},
   "devDependencies": {
