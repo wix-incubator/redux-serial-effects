@@ -4,11 +4,7 @@ const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
 const { fromError, fromSuccess } = require('./action')
 const createTransition = require('./utils/transition')
-
-const isCmd = _ =>
-  _ != null && typeof _.isQueued === 'boolean' && typeof _.type === 'string'
-const isImmediateCommand = _ => isCmd(_) && !_.isQueued
-const isQueuedCommand = _ => isCmd(_) && _.isQueued
+const { isCommand, isImmediateCommand, isQueuedCommand } = require('./commands')
 
 const registrar = list => fn => {
   list.push(fn)
@@ -145,7 +141,7 @@ const createMiddleware = extraArgument => {
           throw e
         },
         commands => {
-          return queueAndRunCommands(commands.filter(isCmd))
+          return queueAndRunCommands(commands.filter(isCommand))
         }
       )
     }
