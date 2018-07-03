@@ -12,7 +12,7 @@ const combineSubscribers = subscriberMap => (transition, extraArgument) =>
               subscriberMap[key](
                 createTransition(transition.from[key], transition.to[key]),
                 extraArgument
-              )
+              ) || []
             )
           : []
     )
