@@ -46,6 +46,7 @@ jspm_packages
 
 .eslintcache
 .vscode/
+.history/
 
 # Mac's .DS_Store
 .DS_Store
