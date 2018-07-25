@@ -23,8 +23,7 @@
     "precommit": "lint-staged",
     "release": "wnpm-release --no-shrinkwrap",
     "test": "jest --coverage",
-    "watch": "jest --watch",
-    "watch:all": "jest --watchAll --coverage"
+    "watch": "jest --watch"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
@@ -35,7 +34,12 @@
   },
   "jest": {
     "testResultsProcessor": "jest-teamcity-reporter",
-    "testPathIgnorePatterns": ["/node_modules/", "/dist/", "/.history/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/",
+      "/.history/"
+    ],
+    "testURL": "http://localhost"
   },
   "dependencies": {},
   "devDependencies": {
@@ -55,7 +59,7 @@
     "flow-bin": "^0.77.0",
     "flow-copy-source": "^2.0.2",
     "husky": "^0.14.3",
-    "jest": "20.0.3",
+    "jest": "^23.4.1",
     "jest-teamcity-reporter": "0.9.0",
     "lint-staged": "^5.0.0",
     "prettier": "^1.7.0",
