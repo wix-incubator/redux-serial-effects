@@ -86,9 +86,12 @@ const createMiddleware = (extraArgument: mixed) => {
       const immediateCommands = commands.filter(isImmediateCommand)
       const promiseTuples = immediateCommands.map(executeCommand)
       promiseTuples.map(tuple => tuple[0]).map(result =>
-        result.fold(error => {
-          throw error
-        }, value => value)
+        result.fold(
+          error => {
+            throw error
+          },
+          value => value
+        )
       )
       promiseTuples
         .map(tuple => tuple[1])
@@ -110,9 +113,12 @@ const createMiddleware = (extraArgument: mixed) => {
 
         return Promise.all(
           promiseTuples.map(tuple => tuple[0]).map(result =>
-            result.fold(error => {
-              return Promise.reject(error)
-            }, value => value)
+            result.fold(
+              error => {
+                return Promise.reject(error)
+              },
+              value => value
+            )
           )
         ).catch(reject)
       } else {
