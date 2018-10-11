@@ -5,13 +5,12 @@ const { createStore, applyMiddleware, combineReducers } = require('redux')
 
 const { combineSubscribers, createMiddleware, matchAction } = require('../src')
 
-const testCommands = require('./utils/commands')
-const testExecutor = require('./utils/executor')
+const testEffects = require('./utils/effects')
 
 const SET_COUNTER = 'SET_COUNTER'
 const VALUE_ACTION = 'VALUE_ACTION'
 const ADD_UNDO = 'ADD_UNDO'
-const COMMAND_ENDED_MSG = 'COMMAND_ENDED_MSG'
+const EFFECT_ENDED_MSG = 'EFFECT_ENDED_MSG'
 
 process.on('unhandledRejection', reason => {
   console.warn('Unhandled rejection:', reason) // eslint-disable-line no-console
@@ -587,7 +586,7 @@ describe('middleware', function() {
     })
   })
 
-  test('should handle subscribers that do not issue commands', function() {
+  test('should handle subscribers that do not return effects', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -618,7 +617,7 @@ describe('middleware', function() {
     ).resolves.toBeUndefined()
   })
 
-  test('should handle subscribers that return empty command lists', function() {
+  test('should handle subscribers that return empty effects lists', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -692,7 +691,7 @@ describe('middleware', function() {
     ).resolves.toBeUndefined()
   })
 
-  test('should execute immediate commands', function() {
+  test('should execute immediate effects', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -721,24 +720,23 @@ describe('middleware', function() {
 
     const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
-        return testCommands.immediateValueCmd(true, VALUE_ACTION)
+        return testEffects.immediateValue(true, VALUE_ACTION)
       }
     }
 
-    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
     const store = createStore(
       reducer,
       initialState,
       applyMiddleware(middleware)
     )
-    registerExecutors(testExecutor.createExecutor())
 
     store.dispatch({ type: SET_COUNTER, value: 1 })
     expect(store.getState().resolved).toBe(true)
   })
 
-  test('should execute queued commands', function() {
+  test('should execute queued effects', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -767,25 +765,24 @@ describe('middleware', function() {
 
     const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
-        return testCommands.queuedDelayedValueCmd(10, true, VALUE_ACTION)
+        return testEffects.queuedDelayedValue(10, true, VALUE_ACTION)
       }
     }
 
-    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
     const store = createStore(
       reducer,
       initialState,
       applyMiddleware(middleware)
     )
-    registerExecutors(testExecutor.createExecutor())
 
     return store.dispatch({ type: SET_COUNTER, value: 1 }).then(() => {
       expect(store.getState().resolved).toBe(true)
     })
   })
 
-  test('should execute immediate commands synchronously', function() {
+  test('should execute immediate effects synchronously', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -815,26 +812,25 @@ describe('middleware', function() {
     const subscriber = ({ from, to, hasChanged }) => {
       if (from.counter !== to.counter) {
         return [
-          testCommands.queuedDelayedValueCmd('BOGUS_ACTION', 1000),
-          testCommands.immediateValueCmd(true, VALUE_ACTION)
+          testEffects.queuedDelayedValue('BOGUS_ACTION', 1000),
+          testEffects.immediateValue(true, VALUE_ACTION)
         ]
       }
     }
 
-    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
     const store = createStore(
       reducer,
       initialState,
       applyMiddleware(middleware)
     )
-    registerExecutors(testExecutor.createExecutor())
 
     store.dispatch({ type: SET_COUNTER, value: 1 })
     expect(store.getState().resolved).toEqual(true)
   })
 
-  test('should allow subscribers to return an array of commands', function() {
+  test('should allow subscribers to return an array of effects', function() {
     expect.assertions(1)
 
     const FLOW_COMPLETE_MSG = 'FLOW_COMPLETE_MSG'
@@ -880,20 +876,19 @@ describe('middleware', function() {
     const subscriber = ({ from, to, hasChanged }) => {
       if (hasChanged(state => state.counter)) {
         return [
-          testCommands.immediateValueCmd(from.counter, ADD_UNDO),
-          testCommands.queuedDelayedValueCmd(20, true, FLOW_COMPLETE_MSG)
+          testEffects.immediateValue(from.counter, ADD_UNDO),
+          testEffects.queuedDelayedValue(20, true, FLOW_COMPLETE_MSG)
         ]
       }
     }
 
-    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
     const store = createStore(
       reducer,
       initialState,
       applyMiddleware(middleware)
     )
-    registerExecutors(testExecutor.createExecutor())
 
     return store
       .dispatch({
@@ -1295,7 +1290,7 @@ describe('middleware', function() {
   })
 
   describe('when an action is not specified', function() {
-    test('and an immediate command completes successfully should not reject', function() {
+    test('and an immediate effect completes successfully should not reject', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1316,25 +1311,24 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateValueCmd('some value')
+          return testEffects.immediateValue('some value')
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return expect(
         store.dispatch({ type: SET_COUNTER, value: 1 })
       ).resolves.toBeUndefined()
     })
 
-    test('and an immediate command throws an exception should rethrow the exception', function() {
+    test('and an immediate effect throws an exception should rethrow the exception', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1356,25 +1350,24 @@ describe('middleware', function() {
       const errorText = 'hardcoded exception'
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateThrowCmd(errorText)
+          return testEffects.immediateThrow(errorText)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       expect(() => store.dispatch({ type: SET_COUNTER, value: 1 })).toThrow(
         new Error(errorText)
       )
     })
 
-    test('and a queued command resolves should not reject', function() {
+    test('and a queued effect resolves should not reject', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1395,25 +1388,24 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedDelayedValueCmd(10, 'something')
+          return testEffects.queuedDelayedValue(10, 'something')
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return expect(
         store.dispatch({ type: SET_COUNTER, value: 1 })
       ).resolves.toBeUndefined()
     })
 
-    test('and a queued command rejects should reject with the correct error', function() {
+    test('and a queued effect rejects should reject with the correct error', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1435,18 +1427,17 @@ describe('middleware', function() {
       const errorText = 'hardcoded rejection'
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedDelayedRejectCmd(10, errorText)
+          return testEffects.queuedDelayedReject(10, errorText)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store
         .dispatch({ type: SET_COUNTER, value: 1 })
@@ -1455,7 +1446,7 @@ describe('middleware', function() {
   })
 
   describe('should dispatch an action', function() {
-    test('when an immediate command completes successfully', function() {
+    test('when an immediate effect completes successfully', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1466,7 +1457,7 @@ describe('middleware', function() {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             expect(action).toEqual(expect.anything())
             return state
           }
@@ -1477,23 +1468,22 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateValueCmd('some value', COMMAND_ENDED_MSG)
+          return testEffects.immediateValue('some value', EFFECT_ENDED_MSG)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store.dispatch({ type: SET_COUNTER, value: 1 })
     })
 
-    test('when an immediate command throws an exception', function() {
+    test('when an immediate effect throws an exception', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1504,7 +1494,7 @@ describe('middleware', function() {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             expect(action).toEqual(expect.anything())
             return state
           }
@@ -1516,25 +1506,24 @@ describe('middleware', function() {
       const errorText = 'hardcoded exception'
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+          return testEffects.immediateThrow(errorText, EFFECT_ENDED_MSG)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       try {
         store.dispatch({ type: SET_COUNTER, value: 1 })
       } catch (e) {}
     })
 
-    test('when a queued command resolves', function() {
+    test('when a queued effect resolves', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1545,7 +1534,7 @@ describe('middleware', function() {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             expect(action).toEqual(expect.anything())
             return state
           }
@@ -1556,27 +1545,26 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedDelayedValueCmd(
+          return testEffects.queuedDelayedValue(
             10,
             'something',
-            COMMAND_ENDED_MSG
+            EFFECT_ENDED_MSG
           )
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store.dispatch({ type: SET_COUNTER, value: 1 })
     })
 
-    test('when a queued command rejects', function() {
+    test('when a queued effect rejects', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1587,7 +1575,7 @@ describe('middleware', function() {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             expect(action).toEqual(expect.anything())
             return state
           }
@@ -1599,28 +1587,27 @@ describe('middleware', function() {
       const errorText = 'hardcoded rejection'
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedDelayedRejectCmd(
+          return testEffects.queuedDelayedReject(
             10,
             errorText,
-            COMMAND_ENDED_MSG
+            EFFECT_ENDED_MSG
           )
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
     })
 
     describe('and handle any rejections', function() {
-      test('when a subsequent immediate command throws an exception', function() {
+      test('when a subsequent immediate effect throws an exception', function() {
         expect.assertions(1)
 
         const initialState = {
@@ -1653,27 +1640,26 @@ describe('middleware', function() {
         const errorText = 'hardcoded exception'
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.immediateRejectCmd(errorText, ADD_UNDO)
+            return testEffects.immediateReject(errorText, ADD_UNDO)
           } else if (hasChanged(state => state.error)) {
-            return testCommands.queuedRejectCmd(errorText, COMMAND_ENDED_MSG)
+            return testEffects.queuedReject(errorText, EFFECT_ENDED_MSG)
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({ type: SET_COUNTER, value: 1 })
           .then(value => expect(value).toBeUndefined())
       })
 
-      test('when a subsequent queued command rejects', function() {
+      test('when a subsequent queued effect rejects', function() {
         expect.assertions(1)
 
         const initialState = {
@@ -1684,7 +1670,7 @@ describe('middleware', function() {
             case SET_COUNTER: {
               return Object.assign({}, state, { counter: action.value })
             }
-            case COMMAND_ENDED_MSG: {
+            case EFFECT_ENDED_MSG: {
               expect(action).toEqual(expect.anything())
               return state
             }
@@ -1696,29 +1682,28 @@ describe('middleware', function() {
         const errorText = 'hardcoded rejection'
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedRejectCmd(
+            return testEffects.queuedDelayedReject(
               10,
               errorText,
-              COMMAND_ENDED_MSG
+              EFFECT_ENDED_MSG
             )
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
       })
     })
 
     describe('with the correct payload', function() {
-      test('when an immediate command completes successfully', function() {
+      test('when an immediate effect completes successfully', function() {
         expect.assertions(1)
 
         const initialState = {
@@ -1749,18 +1734,17 @@ describe('middleware', function() {
 
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
+            return testEffects.immediateValue(from.counter, ADD_UNDO)
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({ type: SET_COUNTER, value: 1 })
@@ -1769,7 +1753,7 @@ describe('middleware', function() {
           )
       })
 
-      test('when an immediate command throws an exception', function() {
+      test('when an immediate effect throws an exception', function() {
         expect.assertions(1)
 
         const errorMsg = 'hardcoded exception'
@@ -1781,14 +1765,14 @@ describe('middleware', function() {
             case SET_COUNTER: {
               return Object.assign({}, state, { counter: action.value })
             }
-            case COMMAND_ENDED_MSG: {
+            case EFFECT_ENDED_MSG: {
               return matchAction(action, {
                 Error: error => {
                   expect(error.message).toEqual(errorMsg)
                   return state
                 },
                 Ok: () => {
-                  throw new Error('command should have failed')
+                  throw new Error('effect should have failed')
                 }
               })
             }
@@ -1799,25 +1783,24 @@ describe('middleware', function() {
 
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.immediateThrowCmd(errorMsg, COMMAND_ENDED_MSG)
+            return testEffects.immediateThrow(errorMsg, EFFECT_ENDED_MSG)
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         try {
           store.dispatch({ type: SET_COUNTER, value: 1 })
         } catch (e) {}
       })
 
-      test('when a queued command resolves', function() {
+      test('when a queued effect resolves', function() {
         expect.assertions(1)
 
         const successValue = 42
@@ -1829,7 +1812,7 @@ describe('middleware', function() {
             case SET_COUNTER: {
               return Object.assign({}, state, { counter: action.value })
             }
-            case COMMAND_ENDED_MSG: {
+            case EFFECT_ENDED_MSG: {
               return matchAction(action, {
                 Error: error => {
                   throw new Error(`unexpected error: ${error}`)
@@ -1847,27 +1830,26 @@ describe('middleware', function() {
 
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedValueCmd(
+            return testEffects.queuedDelayedValue(
               10,
               successValue,
-              COMMAND_ENDED_MSG
+              EFFECT_ENDED_MSG
             )
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store.dispatch({ type: SET_COUNTER, value: 1 })
       })
 
-      test('when a queued command rejects', function() {
+      test('when a queued effect rejects', function() {
         expect.assertions(1)
 
         const errorMsg = 'hardcoded exception'
@@ -1879,14 +1861,14 @@ describe('middleware', function() {
             case SET_COUNTER: {
               return Object.assign({}, state, { counter: action.value })
             }
-            case COMMAND_ENDED_MSG: {
+            case EFFECT_ENDED_MSG: {
               return matchAction(action, {
                 Error: error => {
                   expect(error.message).toEqual(errorMsg)
                   return state
                 },
                 Ok: () => {
-                  throw new Error('command should have failed')
+                  throw new Error('effect should have failed')
                 }
               })
             }
@@ -1897,30 +1879,29 @@ describe('middleware', function() {
 
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedRejectCmd(
+            return testEffects.queuedDelayedReject(
               10,
               errorMsg,
-              COMMAND_ENDED_MSG
+              EFFECT_ENDED_MSG
             )
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
       })
     })
   })
 
-  describe('command execution', function() {
-    test('should not wait for promises returned from immediate commands', function() {
+  describe('effect execution', function() {
+    test('should not wait for promises returned from immediate effects', function() {
       expect.assertions(1)
 
       const initialState = {
@@ -1956,23 +1937,22 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (to.counter === 1) {
-          return testCommands.immediateValueCmd(
+          return testEffects.immediateValue(
             'BOGUS_ACTION',
             firstSideEffectPromise
           )
         } else if (from.counter === 1 && to.counter === 2) {
-          return testCommands.queuedDelayedValueCmd(10, true, VALUE_ACTION)
+          return testEffects.queuedDelayedValue(10, true, VALUE_ACTION)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       store.dispatch({ type: SET_COUNTER, value: 1 })
       return store
@@ -1985,7 +1965,7 @@ describe('middleware', function() {
         })
     })
 
-    describe('should run queued commands only after previous side-effect promises have', function() {
+    describe('should run queued effects only after previous effect promises have', function() {
       test('resolved', function() {
         expect.assertions(1)
 
@@ -2033,27 +2013,22 @@ describe('middleware', function() {
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(getCounter)) {
             if (to.counter === 1) {
-              return testCommands.queuedDelayedValueCmd(
-                20,
-                from.counter,
-                ADD_UNDO
-              )
+              return testEffects.queuedDelayedValue(20, from.counter, ADD_UNDO)
             } else if (to.counter === 2) {
-              return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
+              return testEffects.queuedDelayedValue(5, true, VALUE_ACTION)
             }
           } else if (hasChanged(getResolved)) {
             expect(to.undo).toEqual([0])
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         store.dispatch({ type: SET_COUNTER, value: 1 })
         const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
@@ -2106,27 +2081,22 @@ describe('middleware', function() {
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(getCounter)) {
             if (to.counter === 1) {
-              return testCommands.queuedDelayedRejectCmd(
-                20,
-                from.counter,
-                ADD_UNDO
-              )
+              return testEffects.queuedDelayedReject(20, from.counter, ADD_UNDO)
             } else if (to.counter === 2) {
-              return testCommands.queuedDelayedValueCmd(5, true, VALUE_ACTION)
+              return testEffects.queuedDelayedValue(5, true, VALUE_ACTION)
             }
           } else if (hasChanged(getResolved)) {
             expect(to.error).toBe(true)
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         store.dispatch({ type: SET_COUNTER, value: 1 }).catch(() => {})
         const promise = store.dispatch({ type: SET_COUNTER, value: 2 })
@@ -2137,7 +2107,7 @@ describe('middleware', function() {
   })
 
   describe('should recover the queue after', function() {
-    test('an immediate command throws an exception', function() {
+    test('an immediate effect throws an exception', function() {
       expect.assertions(1)
 
       const errorText = 'hardcoded exception'
@@ -2156,7 +2126,7 @@ describe('middleware', function() {
               undo: state.undo.concat(action.undo)
             })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             return matchAction(action, {
               Error: () => {
                 return state
@@ -2174,24 +2144,23 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+          return testEffects.immediateThrow(errorText, EFFECT_ENDED_MSG)
         } else if (hasChanged(state => state.undo)) {
-          return testCommands.queuedDelayedValueCmd(
+          return testEffects.queuedDelayedValue(
             10,
             'something',
-            COMMAND_ENDED_MSG
+            EFFECT_ENDED_MSG
           )
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       try {
         store.dispatch({
@@ -2202,7 +2171,7 @@ describe('middleware', function() {
       return store.dispatch({ type: ADD_UNDO, undo: 0 })
     })
 
-    test('a queued command throws an exception', function() {
+    test('a queued effect throws an exception', function() {
       expect.assertions(1)
 
       const errorText = 'hardcoded exception'
@@ -2221,7 +2190,7 @@ describe('middleware', function() {
               undo: state.undo.concat(action.undo)
             })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             return matchAction(action, {
               Error: () => {
                 return state
@@ -2239,24 +2208,23 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedThrowCmd(errorText, COMMAND_ENDED_MSG)
+          return testEffects.queuedThrow(errorText, EFFECT_ENDED_MSG)
         } else if (hasChanged(state => state.undo)) {
-          return testCommands.queuedDelayedValueCmd(
+          return testEffects.queuedDelayedValue(
             10,
             'something',
-            COMMAND_ENDED_MSG
+            EFFECT_ENDED_MSG
           )
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store
         .dispatch({
@@ -2267,7 +2235,7 @@ describe('middleware', function() {
         .then(() => store.dispatch({ type: ADD_UNDO, undo: 0 }))
     })
 
-    test('a queued command rejects', function() {
+    test('a queued effect rejects', function() {
       expect.assertions(2)
 
       const errorText = 'hardcoded exception'
@@ -2286,7 +2254,7 @@ describe('middleware', function() {
               undo: state.undo.concat(action.undo)
             })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             return matchAction(action, {
               Error: () => {
                 return state
@@ -2304,28 +2272,23 @@ describe('middleware', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.queuedDelayedRejectCmd(
-            5,
-            errorText,
-            COMMAND_ENDED_MSG
-          )
+          return testEffects.queuedDelayedReject(5, errorText, EFFECT_ENDED_MSG)
         } else if (hasChanged(state => state.undo)) {
-          return testCommands.queuedDelayedValueCmd(
+          return testEffects.queuedDelayedValue(
             10,
             'something',
-            COMMAND_ENDED_MSG
+            EFFECT_ENDED_MSG
           )
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       return store
         .dispatch({
@@ -2339,7 +2302,7 @@ describe('middleware', function() {
 })
 
 describe('dispatch', function() {
-  test('should not return a rejected promise if an immediate command returns a rejected promise', function() {
+  test('should not return a rejected promise if an immediate effect returns a rejected promise', function() {
     expect.assertions(1)
 
     const initialState = {
@@ -2357,20 +2320,19 @@ describe('dispatch', function() {
 
     const errorText = 'hardcoded exception'
     const subscriber = () => {
-      return testCommands.immediateValueCmd(
+      return testEffects.immediateValue(
         Promise.reject(errorText),
-        COMMAND_ENDED_MSG
+        EFFECT_ENDED_MSG
       )
     }
 
-    const { middleware, subscribe, registerExecutors } = createMiddleware()
+    const { middleware, subscribe } = createMiddleware()
     subscribe(subscriber)
     const store = createStore(
       reducer,
       initialState,
       applyMiddleware(middleware)
     )
-    registerExecutors(testExecutor.createExecutor())
 
     return store
       .dispatch({ type: SET_COUNTER, value: 1 })
@@ -2420,7 +2382,7 @@ describe('dispatch', function() {
       }
     })
 
-    test('thrown by an immediate command', function() {
+    test('thrown by an immediate effect', function() {
       expect.assertions(1)
 
       const errorText = 'hardcoded exception'
@@ -2434,13 +2396,13 @@ describe('dispatch', function() {
           case SET_COUNTER: {
             return Object.assign({}, state, { counter: action.value })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             return matchAction(action, {
               Error: () => {
                 return state
               },
               Ok: value => {
-                throw new Error('command was expected to throw an exception')
+                throw new Error('effect was expected to throw an exception')
               }
             })
           }
@@ -2451,18 +2413,17 @@ describe('dispatch', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+          return testEffects.immediateThrow(errorText, EFFECT_ENDED_MSG)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       expect(() =>
         store.dispatch({
@@ -2472,7 +2433,7 @@ describe('dispatch', function() {
       ).toThrow(new Error(errorText))
     })
 
-    test('thrown by a subsequent immediate command', function() {
+    test('thrown by a subsequent immediate effect', function() {
       expect.assertions(1)
 
       const errorText = 'hardcoded exception'
@@ -2498,13 +2459,13 @@ describe('dispatch', function() {
               }
             })
           }
-          case COMMAND_ENDED_MSG: {
+          case EFFECT_ENDED_MSG: {
             return matchAction(action, {
               Error: () => {
                 return state
               },
               Ok: value => {
-                throw new Error('command was expected to throw an exception')
+                throw new Error('effect was expected to throw an exception')
               }
             })
           }
@@ -2515,20 +2476,19 @@ describe('dispatch', function() {
 
       const subscriber = ({ from, to, hasChanged }) => {
         if (hasChanged(state => state.counter)) {
-          return testCommands.immediateValueCmd(from.counter, ADD_UNDO)
+          return testEffects.immediateValue(from.counter, ADD_UNDO)
         } else if (from.undo !== to.undo) {
-          return testCommands.immediateThrowCmd(errorText, COMMAND_ENDED_MSG)
+          return testEffects.immediateThrow(errorText, EFFECT_ENDED_MSG)
         }
       }
 
-      const { middleware, subscribe, registerExecutors } = createMiddleware()
+      const { middleware, subscribe } = createMiddleware()
       subscribe(subscriber)
       const store = createStore(
         reducer,
         initialState,
         applyMiddleware(middleware)
       )
-      registerExecutors(testExecutor.createExecutor())
 
       expect(() =>
         store.dispatch({
@@ -2541,7 +2501,7 @@ describe('dispatch', function() {
 
   describe('should return a promise', function() {
     describe('that resolves', function() {
-      test('when all commands of all subscribers have resolved', function() {
+      test('when all effects of all subscribers have resolved', function() {
         expect.assertions(2)
 
         const FIRST_SIDE_EFFECT_MSG = 'FIRST_SIDE_EFFECT_MSG'
@@ -2608,12 +2568,12 @@ describe('dispatch', function() {
         const firstSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
             return [
-              testCommands.queuedDelayedValueCmd(
+              testEffects.queuedDelayedValue(
                 10,
                 'something',
                 FIRST_SIDE_EFFECT_MSG
               ),
-              testCommands.queuedDelayedValueCmd(
+              testEffects.queuedDelayedValue(
                 5,
                 'something',
                 SECOND_SIDE_EFFECT_MSG
@@ -2625,12 +2585,12 @@ describe('dispatch', function() {
         const secondSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
             return [
-              testCommands.queuedDelayedValueCmd(
+              testEffects.queuedDelayedValue(
                 20,
                 'something',
                 THIRD_SIDE_EFFECT_MSG
               ),
-              testCommands.queuedDelayedValueCmd(
+              testEffects.queuedDelayedValue(
                 15,
                 'something',
                 FOURTH_SIDE_EFFECT_MSG
@@ -2639,7 +2599,7 @@ describe('dispatch', function() {
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(firstSubscriber)
         subscribe(secondSubscriber)
         const store = createStore(
@@ -2647,7 +2607,6 @@ describe('dispatch', function() {
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         const subscriberPromise = store.dispatch({
           type: SET_COUNTER,
@@ -2664,7 +2623,7 @@ describe('dispatch', function() {
         })
       })
 
-      test('only after all related/subsequent commands are resolved', function() {
+      test('only after all related/subsequent effects are resolved', function() {
         expect.assertions(1)
 
         const FLOW_COMPLETE_MSG = 'FLOW_COMPLETE_MSG'
@@ -2709,17 +2668,13 @@ describe('dispatch', function() {
 
         const firstSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedValueCmd(
-              20,
-              from.counter,
-              ADD_UNDO
-            )
+            return testEffects.queuedDelayedValue(20, from.counter, ADD_UNDO)
           }
         }
 
         const secondSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.undo)) {
-            return testCommands.queuedDelayedValueCmd(
+            return testEffects.queuedDelayedValue(
               20,
               'something',
               FLOW_COMPLETE_MSG
@@ -2727,7 +2682,7 @@ describe('dispatch', function() {
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(firstSubscriber)
         subscribe(secondSubscriber)
         const store = createStore(
@@ -2735,7 +2690,6 @@ describe('dispatch', function() {
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({
@@ -2751,7 +2705,7 @@ describe('dispatch', function() {
           })
       })
 
-      test('even when an immediate command returns a rejected promise', function() {
+      test('even when an immediate effect returns a rejected promise', function() {
         expect.assertions(1)
 
         const errorText = 'hardcoded exception'
@@ -2770,13 +2724,13 @@ describe('dispatch', function() {
                 undo: state.undo.concat(action.undo)
               })
             }
-            case COMMAND_ENDED_MSG: {
+            case EFFECT_ENDED_MSG: {
               return matchAction(action, {
                 Error: () => {
                   return state
                 },
                 Ok: value => {
-                  throw new Error('command was expected to fail')
+                  throw new Error('effect was expected to fail')
                 }
               })
             }
@@ -2787,18 +2741,17 @@ describe('dispatch', function() {
 
         const subscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.immediateRejectCmd(errorText, COMMAND_ENDED_MSG)
+            return testEffects.immediateReject(errorText, EFFECT_ENDED_MSG)
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(subscriber)
         const store = createStore(
           reducer,
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({
@@ -2810,7 +2763,7 @@ describe('dispatch', function() {
     })
 
     describe('that rejects', function() {
-      test('if at least one queued command rejects', function() {
+      test('if at least one queued effect rejects', function() {
         expect.assertions(1)
 
         const initialState = {
@@ -2830,26 +2783,18 @@ describe('dispatch', function() {
 
         const firstSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedValueCmd(
-              20,
-              'something',
-              'SOME_MSG'
-            )
+            return testEffects.queuedDelayedValue(20, 'something', 'SOME_MSG')
           }
         }
 
         const errorText = 'hardcoded rejection'
         const secondSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedRejectCmd(
-              20,
-              errorText,
-              'ANOTHER_MSG'
-            )
+            return testEffects.queuedDelayedReject(20, errorText, 'ANOTHER_MSG')
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(combineSubscribers({ root: firstSubscriber }))
         subscribe(combineSubscribers({ root: secondSubscriber }))
         const store = createStore(
@@ -2857,7 +2802,6 @@ describe('dispatch', function() {
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({
@@ -2869,7 +2813,7 @@ describe('dispatch', function() {
           })
       })
 
-      test('if a subsequent command throws an exception', function() {
+      test('if a subsequent effect throws an exception', function() {
         expect.assertions(2)
 
         const initialState = {
@@ -2900,22 +2844,18 @@ describe('dispatch', function() {
 
         const firstSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedValueCmd(
-              20,
-              from.counter,
-              ADD_UNDO
-            )
+            return testEffects.queuedDelayedValue(20, from.counter, ADD_UNDO)
           }
         }
 
         const errorText = 'hardcoded exception'
         const secondSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.undo)) {
-            return testCommands.immediateThrowCmd(errorText, 'SOME_MSG')
+            return testEffects.immediateThrow(errorText, 'SOME_MSG')
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(firstSubscriber)
         subscribe(secondSubscriber)
         const store = createStore(
@@ -2923,7 +2863,6 @@ describe('dispatch', function() {
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({
@@ -2939,7 +2878,7 @@ describe('dispatch', function() {
           })
       })
 
-      test('if a subsequent command rejects', function() {
+      test('if a subsequent effect rejects', function() {
         expect.assertions(2)
 
         const initialState = {
@@ -2970,26 +2909,18 @@ describe('dispatch', function() {
 
         const firstSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.counter)) {
-            return testCommands.queuedDelayedValueCmd(
-              20,
-              from.counter,
-              ADD_UNDO
-            )
+            return testEffects.queuedDelayedValue(20, from.counter, ADD_UNDO)
           }
         }
 
         const errorText = 'hardcoded rejection'
         const secondSubscriber = ({ from, to, hasChanged }) => {
           if (hasChanged(state => state.undo)) {
-            return testCommands.queuedDelayedRejectCmd(
-              20,
-              errorText,
-              'SOME_MSG'
-            )
+            return testEffects.queuedDelayedReject(20, errorText, 'SOME_MSG')
           }
         }
 
-        const { middleware, subscribe, registerExecutors } = createMiddleware()
+        const { middleware, subscribe } = createMiddleware()
         subscribe(firstSubscriber)
         subscribe(secondSubscriber)
         const store = createStore(
@@ -2997,7 +2928,6 @@ describe('dispatch', function() {
           initialState,
           applyMiddleware(middleware)
         )
-        registerExecutors(testExecutor.createExecutor())
 
         return store
           .dispatch({

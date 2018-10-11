@@ -4,7 +4,7 @@ const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
 const { fromError, fromSuccess } = require('./action')
 const createTransition = require('./utils/transition')
-const { isCommand, isImmediateCommand, isQueuedCommand } = require('./commands')
+const { isEffect, isImmediateEffect, isQueuedEffect } = require('./effects')
 
 const registrar = list => fn => {
   list.push(fn)
@@ -18,16 +18,15 @@ const registrar = list => fn => {
 
 const createMiddleware = extraArgument => {
   const subscribers = []
-  const executors = {}
   let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
-    const executeCommand = cmd => {
-      const result = try_(() => executors[cmd.type](cmd.command))
+    const executeEffect = effect => {
+      const result = try_(() => effect.run())
       return result.fold(
         error => {
-          const downstreamPromise = cmd.actionType
-            ? store.dispatch(fromError(cmd.actionType, error))
+          const downstreamPromise = effect.resultActionType
+            ? store.dispatch(fromError(effect.resultActionType, error))
             : Promise.resolve()
           return [result, downstreamPromise]
         },
@@ -35,14 +34,16 @@ const createMiddleware = extraArgument => {
           if (isPromise(value)) {
             const downstreamPromise = value.then(
               resolvedValue => {
-                return cmd.actionType
-                  ? store.dispatch(fromSuccess(cmd.actionType, resolvedValue))
+                return effect.resultActionType
+                  ? store.dispatch(
+                      fromSuccess(effect.resultActionType, resolvedValue)
+                    )
                   : Promise.resolve()
               },
               error => {
-                if (cmd.actionType) {
+                if (effect.resultActionType) {
                   store
-                    .dispatch(fromError(cmd.actionType, error))
+                    .dispatch(fromError(effect.resultActionType, error))
                     .catch(() => {})
                 }
                 throw error
@@ -50,8 +51,8 @@ const createMiddleware = extraArgument => {
             )
             return [result, downstreamPromise]
           } else {
-            const downstreamPromise = cmd.actionType
-              ? store.dispatch(fromSuccess(cmd.actionType, value))
+            const downstreamPromise = effect.resultActionType
+              ? store.dispatch(fromSuccess(effect.resultActionType, value))
               : Promise.resolve()
             return [result, downstreamPromise]
           }
@@ -59,9 +60,9 @@ const createMiddleware = extraArgument => {
       )
     }
 
-    const runImmediateCommands = commands => {
-      const immediateCommands = commands.filter(isImmediateCommand)
-      const promiseTuples = immediateCommands.map(executeCommand)
+    const runImmediateEffects = effects => {
+      const immediateEffects = effects.filter(isImmediateEffect)
+      const promiseTuples = immediateEffects.map(executeEffect)
       promiseTuples.map(tuple => tuple[0]).map(result =>
         result.fold(error => {
           throw error
@@ -70,14 +71,12 @@ const createMiddleware = extraArgument => {
       promiseTuples
         .map(tuple => tuple[1])
         .map(downstreamPromise => downstreamPromise.catch(() => {}))
-      return commands.filter(isQueuedCommand)
+      return effects.filter(isQueuedEffect)
     }
 
-    const executeQueuedCommands = (resolve, reject) => commands => {
-      if (commands.length > 0) {
-        const promiseTuples = commands
-          .filter(isQueuedCommand)
-          .map(executeCommand)
+    const executeQueuedEffects = (resolve, reject) => effects => {
+      if (effects.length > 0) {
+        const promiseTuples = effects.filter(isQueuedEffect).map(executeEffect)
         Promise.all(promiseTuples.map(tuple => tuple[1])).then(
           () => resolve(),
           reject
@@ -102,17 +101,17 @@ const createMiddleware = extraArgument => {
       const promise = new Promise((resolve, reject) => {
         queuePromise = queuePromise
           .then(() => gate)
-          .then(executeQueuedCommands(resolve, reject), reject)
+          .then(executeQueuedEffects(resolve, reject), reject)
           .catch(reject)
       })
 
       return { promise, trigger }
     }
 
-    const queueAndRunCommands = commands => {
+    const queueAndRunEffects = effects => {
       const { promise, trigger } = scheduleExecution()
       return try_(() => {
-        return runImmediateCommands(commands)
+        return runImmediateEffects(effects)
       }).fold(
         e => {
           if (trigger) {
@@ -120,9 +119,9 @@ const createMiddleware = extraArgument => {
           }
           throw e
         },
-        commands => {
+        effects => {
           if (trigger) {
-            trigger(commands)
+            trigger(effects)
           }
           return promise
         }
@@ -135,7 +134,7 @@ const createMiddleware = extraArgument => {
 
     if (from !== to) {
       const transition = createTransition(from, to)
-      const issuedCommands = sequence(
+      const issuedEffects = sequence(
         subscribers
           .slice()
           .map(subscriber =>
@@ -143,12 +142,12 @@ const createMiddleware = extraArgument => {
           )
       )
 
-      return issuedCommands.fold(
+      return issuedEffects.fold(
         e => {
           throw e
         },
-        commands => {
-          return queueAndRunCommands(commands.filter(isCommand))
+        effects => {
+          return queueAndRunEffects(effects.filter(isEffect))
         }
       )
     }
@@ -158,13 +157,8 @@ const createMiddleware = extraArgument => {
 
   const subscribe = registrar(subscribers)
 
-  const registerExecutors = (...args) => {
-    args.forEach(executor => (executors[executor.type] = executor.execute))
-  }
-
   return {
     middleware,
-    registerExecutors,
     subscribe
   }
 }
