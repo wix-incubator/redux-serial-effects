@@ -1,4 +1,3 @@
-// @flow
 'use strict'
 
 const { isPromise } = require('./utils/isPromise')
@@ -7,29 +6,7 @@ const { fromError, fromSuccess } = require('./action')
 const createTransition = require('./utils/transition')
 const { isCommand, isImmediateCommand, isQueuedCommand } = require('./commands')
 
-import type { Command } from './commands'
-import type { Transition } from './utils/transition'
-
-export type Subscriber = (Transition, ?mixed) => Command[] | Command | void
-
-type Resolve = (*) => void
-
-type Action = { type: string }
-
-type Dispatch = (action: Action) => Promise<Action>
-
-type Store = {
-  getState: () => {},
-  dispatch: Dispatch
-}
-
-type Executor = ({}) => * | Promise<*>
-
-type Executors = {
-  [executorName: string]: Executor
-}
-
-const registrar = list => (fn: Function) => {
+const registrar = list => fn => {
   list.push(fn)
   return () => {
     const index = list.indexOf(fn)
@@ -39,13 +16,13 @@ const registrar = list => (fn: Function) => {
   }
 }
 
-const createMiddleware = (extraArgument: mixed) => {
-  const subscribers: Subscriber[] = []
-  const executors: Executors = {}
+const createMiddleware = extraArgument => {
+  const subscribers = []
+  const executors = {}
   let queuePromise = Promise.resolve()
 
-  const middleware = (store: Store) => (next: Dispatch) => (action: Action) => {
-    const executeCommand = (cmd: Command) => {
+  const middleware = store => next => action => {
+    const executeCommand = cmd => {
       const result = try_(() => executors[cmd.type](cmd.command))
       return result.fold(
         error => {
@@ -82,16 +59,13 @@ const createMiddleware = (extraArgument: mixed) => {
       )
     }
 
-    const runImmediateCommands = (commands: Command[]) => {
+    const runImmediateCommands = commands => {
       const immediateCommands = commands.filter(isImmediateCommand)
       const promiseTuples = immediateCommands.map(executeCommand)
       promiseTuples.map(tuple => tuple[0]).map(result =>
-        result.fold(
-          error => {
-            throw error
-          },
-          value => value
-        )
+        result.fold(error => {
+          throw error
+        }, value => value)
       )
       promiseTuples
         .map(tuple => tuple[1])
@@ -99,9 +73,7 @@ const createMiddleware = (extraArgument: mixed) => {
       return commands.filter(isQueuedCommand)
     }
 
-    const executeQueuedCommands = (resolve, reject) => (
-      commands: Command[]
-    ) => {
+    const executeQueuedCommands = (resolve, reject) => commands => {
       if (commands.length > 0) {
         const promiseTuples = commands
           .filter(isQueuedCommand)
@@ -113,12 +85,9 @@ const createMiddleware = (extraArgument: mixed) => {
 
         return Promise.all(
           promiseTuples.map(tuple => tuple[0]).map(result =>
-            result.fold(
-              error => {
-                return Promise.reject(error)
-              },
-              value => value
-            )
+            result.fold(error => {
+              return Promise.reject(error)
+            }, value => value)
           )
         ).catch(reject)
       } else {
@@ -128,7 +97,7 @@ const createMiddleware = (extraArgument: mixed) => {
     }
 
     const scheduleExecution = () => {
-      let trigger: ?Resolve = undefined
+      let trigger = undefined
       const gate = new Promise(resolve => (trigger = resolve))
       const promise = new Promise((resolve, reject) => {
         queuePromise = queuePromise
@@ -140,7 +109,7 @@ const createMiddleware = (extraArgument: mixed) => {
       return { promise, trigger }
     }
 
-    const queueAndRunCommands = (commands: Command[]) => {
+    const queueAndRunCommands = commands => {
       const { promise, trigger } = scheduleExecution()
       return try_(() => {
         return runImmediateCommands(commands)
@@ -178,7 +147,7 @@ const createMiddleware = (extraArgument: mixed) => {
         e => {
           throw e
         },
-        (commands: Command[]) => {
+        commands => {
           return queueAndRunCommands(commands.filter(isCommand))
         }
       )
@@ -189,7 +158,7 @@ const createMiddleware = (extraArgument: mixed) => {
 
   const subscribe = registrar(subscribers)
 
-  const registerExecutors = (...args: Executor[]) => {
+  const registerExecutors = (...args) => {
     args.forEach(executor => (executors[executor.type] = executor.execute))
   }
 

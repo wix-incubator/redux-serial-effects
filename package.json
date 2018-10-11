@@ -7,16 +7,14 @@
   "lint-staged": {
     "linters": {
       "*.{js,jsx}": [
-        "eslint --cache --format codeframe --ext .js,.jsx",
-        "flow focus-check"
+        "eslint --cache --format codeframe --ext .js,.jsx"
       ]
     }
   },
   "scripts": {
-    "build": "npm run build:clean && npm run build:lib && npm run build:flow",
+    "build": "npm run build:clean && npm run build:lib",
     "build:clean": "rimraf dist",
     "build:lib": "babel src --ignore '__tests__' --out-dir dist",
-    "build:flow": "flow-copy-source -v -i '**/__tests__/**' src dist",
     "eslint-check": "eslint --print-config .eslintrc.js | eslint-config-prettier-check",
     "lint": "eslint --cache --format codeframe --ext .js,.jsx .",
     "lint-staged": "lint-staged",
@@ -46,18 +44,14 @@
     "babel-cli": "^6.26.0",
     "babel-eslint": "^8.2.6",
     "babel-preset-env": "^1.6.1",
-    "babel-preset-flow": "^6.23.0",
     "eslint": "^3.16.1",
     "eslint-config-prettier": "^2.4.0",
     "eslint-config-standard": "^7.0.0",
-    "eslint-plugin-flowtype": "^2.50.0",
     "eslint-plugin-jest": "^21.7.0",
     "eslint-plugin-lodash": "^2.4.0",
     "eslint-plugin-prettier": "^2.2.0",
     "eslint-plugin-promise": "^3.5.0",
     "eslint-plugin-standard": "^2.1.1",
-    "flow-bin": "^0.77.0",
-    "flow-copy-source": "^2.0.2",
     "husky": "^0.14.3",
     "jest": "^23.4.1",
     "jest-teamcity-reporter": "0.9.0",

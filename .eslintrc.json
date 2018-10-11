@@ -6,14 +6,12 @@
   "plugins": [
     "lodash",
     "jest",
-    "prettier",
-    "flowtype"
+    "prettier"
   ],
   "extends": [
     "standard",
     "plugin:jest/recommended",
-    "prettier",
-    "plugin:flowtype/recommended"
+    "prettier"
   ],
   "rules": {
     "block-spacing": 0,

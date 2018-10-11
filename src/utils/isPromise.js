@@ -1,7 +1,6 @@
-// @flow
 'use strict'
 
-const isPromise = (maybePromise: ?Promise<*>) =>
+const isPromise = maybePromise =>
   maybePromise != null && typeof maybePromise.then === 'function'
 
 module.exports.isPromise = isPromise
