@@ -70,38 +70,6 @@ describe('combineSubscribers', function() {
   })
 
   describe('should pass subscribers', function() {
-    test('the extra argument given when creating the middleware', function() {
-      expect.assertions(1)
-
-      const initialState = {
-        counter: 0
-      }
-      const reducer = (state = initialState, action) => {
-        switch (action.type) {
-          case SET_COUNTER: {
-            return Object.assign({}, state, { counter: action.value })
-          }
-          default:
-            return state
-        }
-      }
-
-      const extra = Symbol('extra')
-
-      const subscriber = ({ from, to }, extraArgument) => {
-        expect(extra).toEqual(extraArgument)
-      }
-
-      const { middleware, subscribe } = createMiddleware(extra)
-      subscribe(combineSubscribers({ substate: subscriber }))
-      const store = createStore(
-        combineReducers({ substate: reducer }),
-        applyMiddleware(middleware)
-      )
-
-      return store.dispatch({ type: SET_COUNTER, value: 1 })
-    })
-
     describe('a transition object', function() {
       test('with the previous state and the new state', function() {
         expect.assertions(1)
@@ -905,39 +873,6 @@ describe('middleware', function() {
   })
 
   describe('should pass subscribers', function() {
-    test('the extra argument given when creating the middleware', function() {
-      expect.assertions(1)
-
-      const initialState = {
-        counter: 0
-      }
-      const reducer = (state, action) => {
-        switch (action.type) {
-          case SET_COUNTER: {
-            return Object.assign({}, state, { counter: action.value })
-          }
-          default:
-            return state
-        }
-      }
-
-      const extra = Symbol('extra')
-
-      const subscriber = ({ from, to, hasChanged }, extraArgument) => {
-        expect(extra).toEqual(extraArgument)
-      }
-
-      const { middleware, subscribe } = createMiddleware(extra)
-      subscribe(subscriber)
-      const store = createStore(
-        reducer,
-        initialState,
-        applyMiddleware(middleware)
-      )
-
-      return store.dispatch({ type: SET_COUNTER, value: 1 })
-    })
-
     describe('a transition object', function() {
       test('with the previous state and the new state', function() {
         expect.assertions(1)

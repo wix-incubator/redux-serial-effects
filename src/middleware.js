@@ -16,7 +16,7 @@ const registrar = list => fn => {
   }
 }
 
-const createMiddleware = extraArgument => {
+const createMiddleware = () => {
   const subscribers = []
   let queuePromise = Promise.resolve()
 
@@ -137,9 +137,7 @@ const createMiddleware = extraArgument => {
       const issuedEffects = sequence(
         subscribers
           .slice()
-          .map(subscriber =>
-            try_(() => subscriber(transition, extraArgument) || [])
-          )
+          .map(subscriber => try_(() => subscriber(transition) || []))
       )
 
       return issuedEffects.fold(
