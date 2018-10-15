@@ -1,6 +1,6 @@
 {
   "name": "redux-serial-effects",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Predictable side-effect middleware for the predictable state container",
   "license": "MIT",
   "main": "dist/index.js",
