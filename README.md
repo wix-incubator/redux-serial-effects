@@ -58,29 +58,39 @@ error it returned or resolved/rejected with.
 
 ```javascript
 const { createStore, applyMiddleware } = require('redux')
-const { createMiddleware, matchAction } = require('redux-serial-effects')
+const { createMiddleware } = require('redux-serial-effects')
 
 // actions
 
 const SET_DISPLAY_ITEM = 'SET_DISPLAY_ITEM'
-const DATA_RESPONSE = 'DATA_RESPONSE'
+const DATA_RESPONSE_SUCCESS = 'DATA_RESPONSE_SUCCESS'
+const DATA_RESPONSE_FAILURE = 'DATA_RESPONSE_FAILURE'
 
 const setItemToDisplay = id => ({
   type: SET_DISPLAY_ITEM,
   id
 })
 
+const dataResponseSuccess = data => ({
+  type: DATA_RESPONSE_SUCCESS,
+  data
+})
+
+const dataResponseFailure = error => ({
+  type: DATA_RESPONSE_FAILURE,
+  error
+})
+
 // effects
 
-const getDataById = id => ({
-  run: () => {
-    // async network operation
-    return new Promise((resolve, reject) => {
-      setTimeout(() => resolve({ id, content: 'item data' }), 10)
-    })
-  },
+const getDataFromRemoteServiceEffect = id => ({
+  run: () =>
+    new Promise((resolve, reject) => {
+      setTimeout(() => resolve({ content: 'item data' }), 10)
+    }),
   isQueued: true,
-  resultActionType: DATA_RESPONSE
+  resultActionCreator: (error, payload) =>
+    error ? dataResponseFailure(error) : dataResponseSuccess(payload)
 })
 
 // reducer
@@ -94,44 +104,42 @@ const initialState = {
   errorDescription: null
 }
 
+const getDisplayItemId = state => state.itemToDisplay.id
+
 const reducer = (state, action) => {
   switch (action.type) {
-    case SET_DISPLAY_ITEM: {
+    case SET_DISPLAY_ITEM:
       return Object.assign({}, state, {
         itemToDisplay: Object.assign({}, state.itemToDisplay, {
           id: action.id
         })
       })
-    }
-    case DATA_RESPONSE: {
-      return matchAction(action, {
-        Error: error => {
-          return Object.assign({}, state, {
-            errorState: true,
-            errorDescription: error
-          })
-        },
-        Ok: data => {
-          return Object.assign({}, state, {
-            errorState: false,
-            errorDescription: null,
-            itemToDisplay: Object.assign({}, state.itemToDisplay, { data })
-          })
-        }
+
+    case DATA_RESPONSE_FAILURE:
+      return Object.assign({}, state, {
+        errorState: true,
+        errorDescription: action.error
       })
-    }
+
+    case DATA_RESPONSE_SUCCESS:
+      return Object.assign({}, state, {
+        errorState: false,
+        errorDescription: null,
+        itemToDisplay: Object.assign({}, state.itemToDisplay, {
+          data: action.data
+        })
+      })
+
     default:
       return state
   }
 }
 
-const getDisplayItemId = state => state.itemToDisplay.id
-
 // subscriber
 
-const subscriber = ({ from, to, isChanged }) => {
-  if (isChanged(getDisplayItemId)) {
-    return getDataById(to.itemToDisplay.id)
+const subscriber = ({ from, to, hasChanged }) => {
+  if (hasChanged(getDisplayItemId)) {
+    return getDataFromRemoteServiceEffect(to.itemToDisplay.id)
   }
 }
 

@@ -1,3 +1,5 @@
+const { creatorWithType: actionCreatorWithType } = require('./resultAction')
+
 const queuedDelayedValue = (delay, value, resultActionType) => ({
   run: () =>
     new Promise((resolve, reject) => {
@@ -6,7 +8,7 @@ const queuedDelayedValue = (delay, value, resultActionType) => ({
       }, delay)
     }),
   isQueued: true,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const queuedDelayedReject = (delay, error, resultActionType) => ({
@@ -17,13 +19,13 @@ const queuedDelayedReject = (delay, error, resultActionType) => ({
       }, delay)
     }),
   isQueued: true,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const queuedReject = (error, resultActionType) => ({
   run: () => Promise.reject(error),
   isQueued: true,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const queuedThrow = (error, resultActionType) => ({
@@ -31,13 +33,13 @@ const queuedThrow = (error, resultActionType) => ({
     throw new Error(error)
   },
   isQueued: true,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const immediateValue = (value, resultActionType) => ({
   run: () => value,
   isQueued: false,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const immediateThrow = (error, resultActionType) => ({
@@ -45,13 +47,13 @@ const immediateThrow = (error, resultActionType) => ({
     throw new Error(error)
   },
   isQueued: false,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 const immediateReject = (error, resultActionType) => ({
   run: () => Promise.reject(error),
   isQueued: false,
-  resultActionType
+  resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
 module.exports.queuedDelayedValue = queuedDelayedValue

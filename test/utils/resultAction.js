@@ -1,17 +1,6 @@
 'use strict'
 
-const { Either } = require('./utils/either')
-
-const fromError = (type, error) => ({
-  type,
-  error: true,
-  payload: error
-})
-
-const fromSuccess = (type, value) => ({
-  type,
-  payload: value
-})
+const { Either } = require('../../src/utils/either')
 
 const toEither = action => {
   if (action.error === true) {
@@ -25,8 +14,10 @@ const match = (action, patterns) => {
   return toEither(action).match(patterns)
 }
 
+const creatorWithType = type =>
+  type ? (error, payload) => ({ type, error, payload }) : undefined
+
 module.exports = {
-  fromError,
-  fromSuccess,
-  match
+  match,
+  creatorWithType
 }

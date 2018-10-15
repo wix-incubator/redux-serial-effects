@@ -1,16 +1,27 @@
 'use strict'
 
 const { createStore, applyMiddleware } = require('redux')
-const { createMiddleware, matchAction } = require('../src/index')
+const { createMiddleware } = require('../src/index')
 
 // actions
 
 const SET_DISPLAY_ITEM = 'SET_DISPLAY_ITEM'
-const DATA_RESPONSE = 'DATA_RESPONSE'
+const DATA_RESPONSE_SUCCESS = 'DATA_RESPONSE_SUCCESS'
+const DATA_RESPONSE_FAILURE = 'DATA_RESPONSE_FAILURE'
 
 const setItemToDisplay = id => ({
   type: SET_DISPLAY_ITEM,
   id
+})
+
+const dataResponseSuccess = data => ({
+  type: DATA_RESPONSE_SUCCESS,
+  data
+})
+
+const dataResponseFailure = error => ({
+  type: DATA_RESPONSE_FAILURE,
+  error
 })
 
 // effects
@@ -21,7 +32,8 @@ const getDataFromRemoteServiceEffect = id => ({
       setTimeout(() => resolve({ content: 'item data' }), 10)
     }),
   isQueued: true,
-  resultActionType: DATA_RESPONSE
+  resultActionCreator: (isError, payload) =>
+    isError ? dataResponseFailure(payload) : dataResponseSuccess(payload)
 })
 
 // state
@@ -39,30 +51,28 @@ const getDisplayItemId = state => state.itemToDisplay.id
 
 const reducer = (state, action) => {
   switch (action.type) {
-    case SET_DISPLAY_ITEM: {
+    case SET_DISPLAY_ITEM:
       return Object.assign({}, state, {
         itemToDisplay: Object.assign({}, state.itemToDisplay, {
           id: action.id
         })
       })
-    }
-    case DATA_RESPONSE: {
-      return matchAction(action, {
-        Error: error => {
-          return Object.assign({}, state, {
-            errorState: true,
-            errorDescription: error
-          })
-        },
-        Ok: data => {
-          return Object.assign({}, state, {
-            errorState: false,
-            errorDescription: null,
-            itemToDisplay: Object.assign({}, state.itemToDisplay, { data })
-          })
-        }
+
+    case DATA_RESPONSE_FAILURE:
+      return Object.assign({}, state, {
+        errorState: true,
+        errorDescription: action.error
       })
-    }
+
+    case DATA_RESPONSE_SUCCESS:
+      return Object.assign({}, state, {
+        errorState: false,
+        errorDescription: null,
+        itemToDisplay: Object.assign({}, state.itemToDisplay, {
+          data: action.data
+        })
+      })
+
     default:
       return state
   }

@@ -2,7 +2,6 @@
 
 const { isPromise } = require('./utils/isPromise')
 const { sequence, try_ } = require('./utils/either')
-const { fromError, fromSuccess } = require('./action')
 const createTransition = require('./utils/transition')
 const { isEffect, isImmediateEffect, isQueuedEffect } = require('./effects')
 
@@ -25,8 +24,8 @@ const createMiddleware = () => {
       const result = try_(() => effect.run())
       return result.fold(
         error => {
-          const downstreamPromise = effect.resultActionType
-            ? store.dispatch(fromError(effect.resultActionType, error))
+          const downstreamPromise = effect.resultActionCreator
+            ? store.dispatch(effect.resultActionCreator(true, error))
             : Promise.resolve()
           return [result, downstreamPromise]
         },
@@ -34,16 +33,16 @@ const createMiddleware = () => {
           if (isPromise(value)) {
             const downstreamPromise = value.then(
               resolvedValue => {
-                return effect.resultActionType
+                return effect.resultActionCreator
                   ? store.dispatch(
-                      fromSuccess(effect.resultActionType, resolvedValue)
+                      effect.resultActionCreator(false, resolvedValue)
                     )
                   : Promise.resolve()
               },
               error => {
-                if (effect.resultActionType) {
+                if (effect.resultActionCreator) {
                   store
-                    .dispatch(fromError(effect.resultActionType, error))
+                    .dispatch(effect.resultActionCreator(true, error))
                     .catch(() => {})
                 }
                 throw error
@@ -51,8 +50,8 @@ const createMiddleware = () => {
             )
             return [result, downstreamPromise]
           } else {
-            const downstreamPromise = effect.resultActionType
-              ? store.dispatch(fromSuccess(effect.resultActionType, value))
+            const downstreamPromise = effect.resultActionCreator
+              ? store.dispatch(effect.resultActionCreator(false, value))
               : Promise.resolve()
             return [result, downstreamPromise]
           }

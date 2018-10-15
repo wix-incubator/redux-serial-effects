@@ -3,9 +3,10 @@
 
 const { createStore, applyMiddleware, combineReducers } = require('redux')
 
-const { createMiddleware, matchAction } = require('../src')
+const { createMiddleware } = require('../src')
 
 const testEffects = require('./utils/effects')
+const { match: matchAction } = require('./utils/resultAction')
 
 const SET_COUNTER = 'SET_COUNTER'
 const VALUE_ACTION = 'VALUE_ACTION'

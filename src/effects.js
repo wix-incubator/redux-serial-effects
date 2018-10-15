@@ -3,7 +3,9 @@
 const isEffect = maybeEffect =>
   maybeEffect != null &&
   typeof maybeEffect.run === 'function' &&
-  typeof maybeEffect.isQueued === 'boolean'
+  typeof maybeEffect.isQueued === 'boolean' &&
+  (!maybeEffect.resultActionCreator ||
+    typeof maybeEffect.resultActionCreator === 'function')
 
 const isImmediateEffect = maybeEffect =>
   isEffect(maybeEffect) && !maybeEffect.isQueued
