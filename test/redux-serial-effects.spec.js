@@ -3,7 +3,7 @@
 
 const { createStore, applyMiddleware, combineReducers } = require('redux')
 
-const { createMiddleware } = require('../src')
+const { createMiddleware } = require('../src/Index.bs')
 
 const testEffects = require('./utils/effects')
 const { match: matchAction } = require('./utils/resultAction')
@@ -1862,7 +1862,7 @@ describe('dispatch', function() {
     }
 
     const errorText = 'hardcoded exception'
-    const subscriber = () => {
+    const subscriber = transition => {
       return testEffects.immediateValue(
         Promise.reject(errorText),
         EFFECT_ENDED_MSG
@@ -1905,7 +1905,7 @@ describe('dispatch', function() {
       }
 
       const errorText = 'hardcoded exception'
-      const subscriber = () => {
+      const subscriber = transition => {
         throw new Error(errorText)
       }
 

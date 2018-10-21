@@ -1,6 +1,6 @@
 'use strict'
 
-const { Either } = require('../../src/utils/either')
+const { Either } = require('./either')
 
 const toEither = action => {
   if (action.error === true) {

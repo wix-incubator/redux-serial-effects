@@ -56,3 +56,5 @@ dist/
 .tern-project
 
 package-lock.json
+lib
+.merlin

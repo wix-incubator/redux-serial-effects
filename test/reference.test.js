@@ -1,7 +1,7 @@
 'use strict'
 
 const { createStore, applyMiddleware } = require('redux')
-const { createMiddleware } = require('../src/index')
+const { createMiddleware } = require('../src/Index.bs')
 
 // actions
 

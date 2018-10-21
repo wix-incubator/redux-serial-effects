@@ -3,16 +3,8 @@
     "ecmaVersion": 2017,
     "sourceType": "module"
   },
-  "plugins": [
-    "lodash",
-    "jest",
-    "prettier"
-  ],
-  "extends": [
-    "standard",
-    "plugin:jest/recommended",
-    "prettier"
-  ],
+  "plugins": ["jest", "prettier"],
+  "extends": ["standard", "plugin:jest/recommended", "prettier"],
   "rules": {
     "block-spacing": 0,
     "dot-location": 0,
@@ -20,7 +12,6 @@
     "indent": 0,
     "key-spacing": 0,
     "keyword-spacing": 0,
-    "lodash/import-scope": 2,
     "new-parens": 0,
     "no-console": 2,
     "no-extra-parens": 0,
