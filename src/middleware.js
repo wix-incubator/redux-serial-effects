@@ -125,15 +125,11 @@ const createMiddleware = () => {
         return runImmediateEffects(effects)
       }).fold(
         e => {
-          if (trigger) {
-            trigger([])
-          }
+          trigger([])
           throw e
         },
         effects => {
-          if (trigger) {
-            trigger(effects)
-          }
+          trigger(effects)
           return promise
         }
       )
