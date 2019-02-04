@@ -17,6 +17,7 @@ const registrar = list => fn => {
 
 const createMiddleware = () => {
   const subscribers = []
+  const idleCallbacks = []
   let queuePromise = Promise.resolve()
 
   const middleware = store => next => action => {
@@ -63,9 +64,12 @@ const createMiddleware = () => {
       const immediateEffects = effects.filter(isImmediateEffect)
       const promiseTuples = immediateEffects.map(executeEffect)
       promiseTuples.map(tuple => tuple[0]).map(result =>
-        result.fold(error => {
-          throw error
-        }, value => value)
+        result.fold(
+          error => {
+            throw error
+          },
+          value => value
+        )
       )
       promiseTuples
         .map(tuple => tuple[1])
@@ -83,9 +87,12 @@ const createMiddleware = () => {
 
         return Promise.all(
           promiseTuples.map(tuple => tuple[0]).map(result =>
-            result.fold(error => {
-              return Promise.reject(error)
-            }, value => value)
+            result.fold(
+              error => {
+                return Promise.reject(error)
+              },
+              value => value
+            )
           )
         ).catch(reject)
       } else {
@@ -98,10 +105,15 @@ const createMiddleware = () => {
       let trigger = undefined
       const gate = new Promise(resolve => (trigger = resolve))
       const promise = new Promise((resolve, reject) => {
-        queuePromise = queuePromise
+        const p = (queuePromise = queuePromise
           .then(() => gate)
           .then(executeQueuedEffects(resolve, reject), reject)
           .catch(reject)
+          .then(() => {
+            if (p === queuePromise) {
+              idleCallbacks.slice().forEach(cb => cb())
+            }
+          }))
       })
 
       return { promise, trigger }
@@ -153,10 +165,12 @@ const createMiddleware = () => {
   }
 
   const subscribe = registrar(subscribers)
+  const onIdle = registrar(idleCallbacks)
 
   return {
     middleware,
-    subscribe
+    subscribe,
+    onIdle
   }
 }
 

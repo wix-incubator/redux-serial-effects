@@ -56,6 +56,21 @@ const immediateReject = (error, resultActionType) => ({
   resultActionCreator: actionCreatorWithType(resultActionType)
 })
 
+const queuedTriggeredValue = (value, resultActionType) => {
+  let trigger = null
+  const promise = new Promise((resolve, reject) => {
+    trigger = () => resolve(value)
+  })
+
+  return {
+    trigger,
+    run: () => promise,
+    isQueued: true,
+    resultActionCreator: actionCreatorWithType(resultActionType)
+  }
+}
+
+module.exports.queuedTriggeredValue = queuedTriggeredValue
 module.exports.queuedDelayedValue = queuedDelayedValue
 module.exports.queuedDelayedReject = queuedDelayedReject
 module.exports.queuedReject = queuedReject

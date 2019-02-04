@@ -2490,3 +2490,159 @@ describe('dispatch', function() {
     })
   })
 })
+
+describe('onIdle', function() {
+  function setupConsecutiveQueuedTriggeredEffectsWithIdleFunc() {
+    const initialState = {
+      counter: 0,
+      undo: []
+    }
+    const reducer = (state, action) => {
+      switch (action.type) {
+        case SET_COUNTER: {
+          return Object.assign({}, state, { counter: action.value })
+        }
+        case ADD_UNDO: {
+          return matchAction(action, {
+            Error: error => {
+              throw new Error(`unexpected error: ${error}`)
+            },
+            Ok: undo => {
+              return Object.assign({}, state, {
+                undo: state.undo.concat(undo)
+              })
+            }
+          })
+        }
+        default:
+          return state
+      }
+    }
+
+    let firstTrigger = null
+    let secondTrigger = null
+    const firstSubscriber = ({ from, to, hasChanged }) => {
+      if (hasChanged(state => state.counter)) {
+        const immediateEffect = testEffects.immediateValue(
+          from.counter,
+          ADD_UNDO
+        )
+        const queuedEffect = testEffects.queuedTriggeredValue(0, 'BOGUS_ACTION')
+        firstTrigger = queuedEffect.trigger
+        return [immediateEffect, queuedEffect]
+      }
+    }
+
+    const secondSubscriber = ({ from, to, hasChanged }) => {
+      if (hasChanged(state => state.undo)) {
+        const effect = testEffects.queuedTriggeredValue(from.undo, 'SOME_MSG')
+        secondTrigger = effect.trigger
+        return effect
+      }
+    }
+
+    const { middleware, subscribe, onIdle } = createMiddleware()
+    subscribe(firstSubscriber)
+    subscribe(secondSubscriber)
+    const store = createStore(
+      reducer,
+      initialState,
+      applyMiddleware(middleware)
+    )
+
+    const idleFunc = jest.fn()
+    const unregisterIdleCallback = onIdle(idleFunc)
+
+    store.dispatch({
+      type: SET_COUNTER,
+      value: 1
+    })
+
+    return {
+      firstTrigger,
+      secondTrigger,
+      idleFunc,
+      unregisterIdleCallback
+    }
+  }
+
+  test('should not call a registered idle callback before any queued effect has executed', async function() {
+    const { idleFunc } = setupConsecutiveQueuedTriggeredEffectsWithIdleFunc()
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(idleFunc).toHaveBeenCalledTimes(0)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      }, 0)
+    })
+  })
+
+  test('should not call a registered idle callback when there are still side-effects left to execute', async function() {
+    const {
+      firstTrigger,
+      idleFunc
+    } = setupConsecutiveQueuedTriggeredEffectsWithIdleFunc()
+
+    firstTrigger()
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(idleFunc).toHaveBeenCalledTimes(0)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      }, 0)
+    })
+  })
+
+  test('should call a registered idle callback when there are no side-effects left to execute', async function() {
+    const {
+      firstTrigger,
+      secondTrigger,
+      idleFunc
+    } = setupConsecutiveQueuedTriggeredEffectsWithIdleFunc()
+
+    firstTrigger()
+    secondTrigger()
+
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(idleFunc).toHaveBeenCalledTimes(1)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      }, 0)
+    })
+  })
+
+  test('should not call an unregistered idle callback when there are no side-effects left to execute', async function() {
+    const {
+      firstTrigger,
+      secondTrigger,
+      idleFunc,
+      unregisterIdleCallback
+    } = setupConsecutiveQueuedTriggeredEffectsWithIdleFunc()
+
+    firstTrigger()
+    unregisterIdleCallback()
+
+    secondTrigger()
+
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          expect(idleFunc).toHaveBeenCalledTimes(0)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      }, 0)
+    })
+  })
+})
