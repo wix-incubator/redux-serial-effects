@@ -44,7 +44,7 @@
     "babel-cli": "^6.26.0",
     "babel-eslint": "^8.2.6",
     "babel-preset-env": "^1.6.1",
-    "eslint": "^3.16.1",
+    "eslint": "^6.6.0",
     "eslint-config-prettier": "^2.4.0",
     "eslint-config-standard": "^7.0.0",
     "eslint-plugin-jest": "^21.7.0",
